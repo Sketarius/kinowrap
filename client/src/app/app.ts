@@ -88,6 +88,7 @@ export class App implements OnInit {
   status = signal<Status | null>(null);
   jobs = signal<Job[]>([]);
   error = signal('');
+  note = signal(''); // a friendly hint (not an error), e.g. which image number a button just added
   busy = signal(false);
 
   // ---- history view, library, insights ---------------------------------------------------------
@@ -558,6 +559,7 @@ export class App implements OnInit {
   async generate() {
     // Anything typed into a URL box counts, even if Add URL wasn't clicked.
     for (const role of Object.keys(this.pending()) as Role[]) this.commitPending(role);
+    this.note.set('');
     await this.refreshEstimate();
     const est = this.estimate();
     if (!est) return;
@@ -615,6 +617,7 @@ export class App implements OnInit {
     if (job.ratio && job.ratio !== 'adaptive') this.ratio.set(job.ratio);
     this.expansion.set(job.expansion ?? 'balanced');
     this.error.set('');
+    this.note.set('');
     this.refs.set(await this.rehydrate(job.refs));
     window.scrollTo({ top: 0, behavior: 'smooth' });
     this.refreshEstimate();
@@ -753,6 +756,34 @@ export class App implements OnInit {
       await this.reuse(job);
       this.refs.set([{ type: 'image', role: 'first_frame', url: dataUrl, name: 'last frame of previous clip' }]);
       this.refreshEstimate();
+    } catch (e: any) {
+      this.error.set(e.error?.error ?? "Couldn't grab the last frame.");
+    }
+  }
+
+  // Like "Continue from last frame", but the frame becomes an extra reference image instead of the first frame.
+  // The clip's own references are kept (so the character and voices carry over); frames can't be mixed with references.
+  async lastFrameAsReference(job: Job) {
+    this.error.set('');
+    try {
+      const { url } = await firstValueFrom(this.http.post<{ url: string }>(`/api/jobs/${job.id}/last-frame`, {}));
+      const blob = await (await fetch(url)).blob();
+      const dataUrl = await this.readDataUrl(new File([blob], 'last-frame.png', { type: blob.type || 'image/png' }));
+      await this.reuse(job);
+      const kept = this.refs().filter((r) => r.role.startsWith('reference'));
+      const images = kept.filter((r) => r.role === 'reference_image').length;
+      const max = this.limits()?.referenceImages ?? 9;
+      if (images >= max) {
+        this.refs.set(kept);
+        this.error.set(`This clip already has ${images} reference images (the limit is ${max}). Remove one, then try again.`);
+        return;
+      }
+      // Naming it lets the cast helper write "Image N shows the last frame of the previous clip." into the prompt for you.
+      this.refs.set([...kept, { type: 'image', role: 'reference_image', url: dataUrl, name: 'last frame of previous clip', character: 'the last frame of the previous clip' }]);
+      this.refreshEstimate();
+      this.note.set(this.useCast()
+        ? `The last frame was added as Image ${images + 1}, and the cast lines at the start of your prompt will say so. You can rename it in the References box.`
+        : `The last frame was added as Image ${images + 1}. Cast lines are off, so mention it in your prompt, for example "Image ${images + 1} is the opening scene; continue from there."`);
     } catch (e: any) {
       this.error.set(e.error?.error ?? "Couldn't grab the last frame.");
     }
