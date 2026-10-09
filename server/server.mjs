@@ -62,7 +62,8 @@ const MODELS = {
 if (existsSync(LOCAL_H3_SCRIPT) && existsSync(LOCAL_H3_PYTHON)) {
   MODELS[LOCAL] = {
     label: 'Local (free, slow)', local: true, minSeconds: 1, maxSeconds: LOCAL_H3_MAX_SECONDS,
-    rates: { '480P': 0 }, refVideoRates: {}, freeImages: 0, extraImage: 0, ratios: ['16:9', '9:16'],
+    rates: { '480P': 0, '768P': 0 }, maxSecondsByRes: { '768P': Math.min(5, LOCAL_H3_MAX_SECONDS) },
+    refVideoRates: {}, freeImages: 0, extraImage: 0, ratios: ['16:9', '9:16'],
   };
 }
 // 768P -> 2K regeneration. As read from the pricing page: output seconds plus the source video as input.
@@ -178,7 +179,7 @@ function estimate(body) {
   const { duration, resolution } = body;
   const rate = model.rates[resolution];
   if (rate === undefined) throw new Error(`${model.label} supports ${Object.keys(model.rates).join(' or ')}, not ${resolution}.`);
-  const maxSeconds = model.maxSeconds ?? 15;
+  const maxSeconds = model.maxSecondsByRes?.[resolution] ?? model.maxSeconds ?? 15;
   if (!Number.isInteger(duration) || duration < model.minSeconds || duration > maxSeconds) {
     throw new Error(`${model.label} clips must be a whole number of seconds from ${model.minSeconds} to ${maxSeconds}.`);
   }
@@ -431,9 +432,10 @@ function runNextLocal() {
     const job = l.jobs.find((j) => j.id === id);
     if (!job || job.status !== 'processing') { const x = localInputs.get(id); localInputs.delete(id); if (x) fs.rm(x.dir, { recursive: true, force: true }).catch(() => {}); return runNextLocal(); }
     job.rawStatus = 'running';
+    job.startedAt = new Date().toISOString();
     await writeLedger(l);
     const out = path.join(OUT_DIR, `${id}.mp4`);
-    const args = ['-u', LOCAL_H3_SCRIPT, '--seconds', String(job.duration), '--steps', String(job.steps), '--seed', String(job.seed), '--out', out];
+    const args = ['-u', LOCAL_H3_SCRIPT, '--seconds', String(job.duration), '--steps', String(job.steps), '--seed', String(job.seed), '--res', job.resolution === '768P' ? '768' : '480', '--out', out];
     if (job.ratio === '9:16') args.push('--vertical');
     if (job.ratio === 'adaptive') args.push('--auto-orient');
     const inputs = localInputs.get(id);
@@ -444,9 +446,12 @@ function runNextLocal() {
     const child = spawn(LOCAL_H3_PYTHON, args, { cwd: LOCAL_H3_DIR, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     localRunning = { id, child };
     const tail = [];
+    let timing = null;
     const onLine = (line) => {
-      const m = line.match(/^STEP (\d+)\/(\d+)/);
-      if (m) localProgress.set(id, { step: Number(m[1]), total: Number(m[2]) });
+      const m = line.match(/^STEP (\d+)\/(\d+) [\d.]+s elapsed (\d+)s eta (\d+)s/);
+      const t = line.match(/^TIMING step_seconds ([\d.]+) overhead_seconds ([\d.]+)/);
+      if (m) localProgress.set(id, { step: Number(m[1]), total: Number(m[2]), elapsed: Number(m[3]), eta: Number(m[4]) });
+      else if (t) timing = { stepSeconds: Number(t[1]), overheadSeconds: Number(t[2]) };
       else if (line.trim()) { tail.push(line.trim()); if (tail.length > 30) tail.shift(); }
     };
     for (const stream of [child.stdout, child.stderr]) {
@@ -470,7 +475,7 @@ function runNextLocal() {
         if (cancelled) { j.status = 'cancelled'; return; }
         j.rawStatus = ok ? 'succeeded' : 'failed';
         j.status = ok ? 'succeeded' : 'failed';
-        if (ok) j.file = `${id}.mp4`;
+        if (ok) { j.file = `${id}.mp4`; if (timing) j.timing = timing; } // timing feeds the run-time guess for future jobs
         else j.failReason = err?.message || [...tail].reverse().find((t) => /error|exception/i.test(t)) || tail[tail.length - 1] || `h3 exited with code ${code}`;
       }).catch(() => {});
       runNextLocal();
@@ -507,6 +512,14 @@ async function stageLocalInputs(id, refs) {
 function killLocal(child) {
   if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
   else child.kill('SIGTERM');
+}
+
+// A rough run-time guess from your most recent finished local job with the same mode and length.
+async function localEta(mode, duration, resolution) {
+  const l = await readLedger();
+  const past = [...l.jobs].reverse().find((j) => j.model === LOCAL && j.status === 'succeeded' && j.timing && j.mode === mode && j.duration === duration && j.resolution === resolution);
+  if (!past) return null;
+  return { seconds: Math.round(past.timing.stepSeconds * LOCAL_H3_STEPS + past.timing.overheadSeconds), duration, mode, resolution };
 }
 
 // Jobs that were running when the server last stopped can't be resumed.
@@ -552,7 +565,12 @@ const routes = {
     return [200, { remaining: remainingOf(l), syncedAt: l.balanceSync.at }];
   },
 
-  'POST /api/estimate': async (req) => [200, estimate(await readBody(req))],
+  'POST /api/estimate': async (req) => {
+    const body = await readBody(req);
+    const est = estimate(body);
+    if (MODELS[body.model]?.local) est.localEta = await localEta(est.mode, body.duration, body.resolution);
+    return [200, est];
+  },
 
   'POST /api/generate': async (req) => {
     const body = await readBody(req);

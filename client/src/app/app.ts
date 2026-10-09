@@ -15,14 +15,14 @@ interface Ref {
   seconds?: number;
   character?: string; // who this reference belongs to (used to write the cast lines)
 }
-interface ModelInfo { label: string; minSeconds: number; rates: Record<string, number>; maxSeconds?: number; ratios?: string[]; local?: boolean }
+interface ModelInfo { label: string; minSeconds: number; rates: Record<string, number>; maxSeconds?: number; maxSecondsByRes?: Record<string, number>; ratios?: string[]; local?: boolean }
 interface Limits {
   prompt: number; referenceImages: number; videos: number; audios: number; totalFiles: number;
   clipMin: number; clipMax: number; videoTotalSeconds: number; audioTotalSeconds: number;
   imageBytes: number; videoBytes: number; audioBytes: number; requestBytes: number;
 }
 interface Line { label: string; cost: number }
-interface Estimate { lines: Line[]; total: number; mode: string; ratio: string }
+interface Estimate { lines: Line[]; total: number; mode: string; ratio: string; localEta?: { seconds: number; duration: number; mode: string; resolution: string } | null }
 interface Status {
   maxSpend: number; spent: number; remaining: number; syncedAt: string | null; syncedAmount: number | null;
   models: Record<string, ModelInfo>; ratios: string[]; expansion: string[]; limits: Limits;
@@ -35,7 +35,7 @@ interface Job {
   refs?: StoredRef[]; refunded?: boolean;
   usage?: { output_seconds?: number; input_seconds?: number; total_seconds?: number; input_image_count?: number };
   failReason?: string | null; raw?: string; upgrade?: { lines: Line[]; total: number } | null; upgradedTo?: string;
-  hidden?: boolean; fileDeleted?: boolean; rawStatus?: string; progress?: { step: number; total: number }; meteredCost?: number; sources?: string[]; castBlock?: string;
+  hidden?: boolean; fileDeleted?: boolean; rawStatus?: string; progress?: { step: number; total: number; elapsed: number; eta: number }; startedAt?: string; meteredCost?: number; sources?: string[]; castBlock?: string;
 }
 // A reference as the server remembers it: a web link, or the name of an uploaded file it saved.
 interface StoredRef { type: RefType; role: Role; url?: string; file?: string; name?: string; seconds?: number; character?: string }
@@ -123,7 +123,7 @@ export class App implements OnInit {
   modelInfo = computed(() => this.models()[this.model()]);
   resolutions = computed(() => Object.keys(this.modelInfo()?.rates ?? {}));
   minSeconds = computed(() => this.modelInfo()?.minSeconds ?? 4);
-  maxSeconds = computed(() => this.modelInfo()?.maxSeconds ?? 15);
+  maxSeconds = computed(() => this.modelInfo()?.maxSecondsByRes?.[this.resolution()] ?? this.modelInfo()?.maxSeconds ?? 15);
   isLocal = computed(() => !!this.modelInfo()?.local);
   limits = computed(() => this.status()?.limits);
 
@@ -367,6 +367,7 @@ export class App implements OnInit {
 
   set(key: 'duration' | 'resolution' | 'ratio' | 'expansion', value: any) {
     (this[key] as any).set(key === 'duration' ? Number(value) : value);
+    if (key === 'resolution' && this.duration() > this.maxSeconds()) this.duration.set(this.maxSeconds()); // e.g. local 768p is shorter
     this.refreshEstimate();
   }
 
@@ -632,6 +633,16 @@ export class App implements OnInit {
     } catch (e: any) {
       this.error.set(e.error?.error ?? 'Upgrade failed.');
     }
+  }
+
+  // 75 -> "1m 15s", 5400 -> "1h 30m"
+  fmtTime(seconds: number) {
+    const s = Math.max(0, Math.round(seconds));
+    return s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+  }
+
+  since(iso?: string) {
+    return iso ? this.fmtTime((Date.now() - new Date(iso).getTime()) / 1000) : 'a moment';
   }
 
   modelLabel(job: Job) {
