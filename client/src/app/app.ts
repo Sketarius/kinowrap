@@ -15,14 +15,14 @@ interface Ref {
   seconds?: number;
   character?: string; // who this reference belongs to (used to write the cast lines)
 }
-interface ModelInfo { label: string; minSeconds: number; rates: Record<string, number>; maxSeconds?: number; ratios?: string[]; local?: boolean }
+interface ModelInfo { label: string; minSeconds: number; rates: Record<string, number>; maxSeconds?: number; maxSecondsByRes?: Record<string, number>; ratios?: string[]; local?: boolean }
 interface Limits {
   prompt: number; referenceImages: number; videos: number; audios: number; totalFiles: number;
   clipMin: number; clipMax: number; videoTotalSeconds: number; audioTotalSeconds: number;
   imageBytes: number; videoBytes: number; audioBytes: number; requestBytes: number;
 }
 interface Line { label: string; cost: number }
-interface Estimate { lines: Line[]; total: number; mode: string; ratio: string; localEta?: { seconds: number; duration: number; mode: string } | null }
+interface Estimate { lines: Line[]; total: number; mode: string; ratio: string; localEta?: { seconds: number; duration: number; mode: string; resolution: string } | null }
 interface Status {
   maxSpend: number; spent: number; remaining: number; syncedAt: string | null; syncedAmount: number | null;
   models: Record<string, ModelInfo>; ratios: string[]; expansion: string[]; limits: Limits;
@@ -123,7 +123,7 @@ export class App implements OnInit {
   modelInfo = computed(() => this.models()[this.model()]);
   resolutions = computed(() => Object.keys(this.modelInfo()?.rates ?? {}));
   minSeconds = computed(() => this.modelInfo()?.minSeconds ?? 4);
-  maxSeconds = computed(() => this.modelInfo()?.maxSeconds ?? 15);
+  maxSeconds = computed(() => this.modelInfo()?.maxSecondsByRes?.[this.resolution()] ?? this.modelInfo()?.maxSeconds ?? 15);
   isLocal = computed(() => !!this.modelInfo()?.local);
   limits = computed(() => this.status()?.limits);
 
@@ -367,6 +367,7 @@ export class App implements OnInit {
 
   set(key: 'duration' | 'resolution' | 'ratio' | 'expansion', value: any) {
     (this[key] as any).set(key === 'duration' ? Number(value) : value);
+    if (key === 'resolution' && this.duration() > this.maxSeconds()) this.duration.set(this.maxSeconds()); // e.g. local 768p is shorter
     this.refreshEstimate();
   }
 

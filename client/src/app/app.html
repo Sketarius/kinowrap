@@ -230,7 +230,7 @@
         <div class="total"><span>Total</span><span>${{ e.total.toFixed(2) }}</span></div>
         @if (isLocal()) {
           <p class="hint">
-            @if (e.localEta; as t) { Rough run time: about {{ fmtTime(t.seconds) }}, from your last {{ t.duration }}s job of this kind. }
+            @if (e.localEta; as t) { Rough run time: about {{ fmtTime(t.seconds) }}, from your last {{ t.duration }}s {{ t.resolution }} job of this kind. }
             @else { No timing yet for this kind of job. The first one measures it, and later ones show a guess here. }
           </p>
         }
