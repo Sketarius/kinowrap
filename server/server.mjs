@@ -29,7 +29,7 @@ const LOCAL_H3_DIR = process.env.LOCAL_H3_DIR || path.join(__dirname, '..', '..'
 const LOCAL_H3_SCRIPT = path.join(LOCAL_H3_DIR, 'h3.py');
 const LOCAL_H3_PYTHON = path.join(LOCAL_H3_DIR, 'venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
 const LOCAL_H3_STEPS = Number(process.env.LOCAL_H3_STEPS || 20);
-const LOCAL_H3_MAX_SECONDS = Number(process.env.LOCAL_H3_MAX_SECONDS || 5);
+const LOCAL_H3_MAX_SECONDS = Number(process.env.LOCAL_H3_MAX_SECONDS || 10);
 const LOCAL = 'local-h3';
 
 if (!API_KEY) {
