@@ -254,6 +254,7 @@
       </ul>
     }
     @if (error()) { <p class="error">{{ error() }}</p> }
+    @if (note()) { <p class="hint">{{ note() }}</p> }
 
     <button class="go" [disabled]="!canGenerate()" (click)="generate()">
       {{ busy() ? 'Submitting…' : 'Generate' + (estimate() ? ' — $' + estimate()!.total.toFixed(2) : '') }}
@@ -348,7 +349,8 @@
         <div class="actions">
           @if (j.file) { <a class="btn" [href]="'/videos/' + j.file" [attr.download]="j.id + '.mp4'">Download</a> }
           <button type="button" (click)="reuse(j)">Reuse settings</button>
-          @if (j.file && j.type !== 'stitch') { <button type="button" (click)="continueFrom(j)" title="Start a new clip from this clip's last frame">Continue from last frame</button> }
+          @if (j.file && j.type !== 'stitch') { <button type="button" (click)="continueFrom(j)" title="Exact continuation: this clip's last frame becomes the new clip's first frame. Frames can't be combined with references.">Continue from last frame</button> }
+          @if (j.file && j.type !== 'stitch') { <button type="button" (click)="lastFrameAsReference(j)" title="Looser continuation: this clip's last frame is added as a reference image, and the clip's own references are kept (characters, voices).">Last frame as reference</button> }
           @if (canUpscale(j)) {
             <select class="upsel" aria-label="Upscaler model" (change)="setUpscaler($any($event.target).value)">
               @for (u of upscalers(); track u.id) { <option [value]="u.id" [selected]="u.id === chosenUpscaler()" [title]="u.note">{{ u.label }}</option> }

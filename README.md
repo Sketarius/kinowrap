@@ -40,7 +40,7 @@ A local web app for making AI video with [MiniMax](https://www.minimax.io)'s vid
 - **macOS, Linux or Windows 11.** The launcher has Windows handling (tested on Windows 11). The Angular 22 page needs Node 22.22.3 or newer (or 24.15+), which is newer than the server's 20.6 minimum.
 - **[Node.js](https://nodejs.org) 20.6 or newer** (the server reads its settings file with `node --env-file`). Check with `node -v`.
 - **npm** (comes with Node).
-- **[ffmpeg](https://ffmpeg.org/download.html)** on your PATH. It's only needed for "Continue from last frame" and "Stitch". Check with `ffmpeg -version`. On macOS: `brew install ffmpeg`.
+- **[ffmpeg](https://ffmpeg.org/download.html)** on your PATH. It's only needed for "Continue from last frame", "Last frame as reference" and "Stitch". Check with `ffmpeg -version`. On macOS: `brew install ffmpeg`.
 - A modern browser.
 - A **MiniMax account with some balance** and a **pay-as-you-go API key** (next section).
 
@@ -161,6 +161,7 @@ The new job appears in **History** and is checked every 10 seconds. A 15-second 
 | **Download** | Saves the video file. |
 | **Reuse settings** | Loads the prompt, settings **and references** (with their character names) back into the form. |
 | **Continue from last frame** | Extracts the clip's final frame and sets it as the first frame of a new job. Keeps the look; motion and audio don't carry over. |
+| **Last frame as reference** | Extracts the clip's final frame and adds it as a **reference image** (the next free "Image N"; Kinowrap tells you which number). The clip's own references, with their character names, are kept, so characters and voices carry over. A looser continuation than the button above, but the only one that works together with references: first/last frames and references can't be combined in one job. If the clip was itself made from frames, those are dropped and the last frame becomes the only reference. |
 | **Upgrade to 2K** | Regenerates a finished H3 768p clip at 2K (clips from the last 7 days). Shows the price first. |
 | **Cancel** | For jobs still queued. MiniMax doesn't charge for cancelled queued tasks. Running jobs can't be cancelled. |
 | **Mark not charged** | For failed jobs MiniMax didn't bill, so your totals stay right. |
