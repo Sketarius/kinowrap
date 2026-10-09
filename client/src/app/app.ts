@@ -778,9 +778,12 @@ export class App implements OnInit {
         this.error.set(`This clip already has ${images} reference images (the limit is ${max}). Remove one, then try again.`);
         return;
       }
-      this.refs.set([...kept, { type: 'image', role: 'reference_image', url: dataUrl, name: 'last frame of previous clip' }]);
+      // Naming it lets the cast helper write "Image N shows the last frame of the previous clip." into the prompt for you.
+      this.refs.set([...kept, { type: 'image', role: 'reference_image', url: dataUrl, name: 'last frame of previous clip', character: 'the last frame of the previous clip' }]);
       this.refreshEstimate();
-      this.note.set(`The last frame was added as Image ${images + 1}. Mention it in your prompt, for example "Image ${images + 1} is the opening scene; continue from there."`);
+      this.note.set(this.useCast()
+        ? `The last frame was added as Image ${images + 1}, and the cast lines at the start of your prompt will say so. You can rename it in the References box.`
+        : `The last frame was added as Image ${images + 1}. Cast lines are off, so mention it in your prompt, for example "Image ${images + 1} is the opening scene; continue from there."`);
     } catch (e: any) {
       this.error.set(e.error?.error ?? "Couldn't grab the last frame.");
     }
