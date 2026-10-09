@@ -289,7 +289,7 @@
           @if (j.file) { <input type="checkbox" class="pick" [checked]="isSelected(j)" (change)="toggleSelect(j)" title="Select for stitching" /> }
           <strong>{{ j.status }}</strong>
           @if (j.type === 'upgrade') { · <span class="tag">2K upgrade</span> }
-          @if (j.type === 'upscale') { · <span class="tag">upscaled to 768p</span> }
+          @if (j.type === 'upscale') { · <span class="tag">upscaled to 768p · {{ upscalerLabel(j) }}</span> }
           · {{ modelLabel(j) }} {{ j.duration }}s {{ j.resolution }}@if (j.ratio) { · {{ j.ratio }} } · {{ j.model === 'local-h3' ? 'free' : '$' + j.cost.toFixed(2) }}
           @if (j.type !== 'stitch') { · {{ j.refs?.length ? j.refs!.length + ' reference(s) sent' : 'no references' }} }
           @if (j.hidden) { · <em>hidden</em> }
@@ -349,7 +349,12 @@
           @if (j.file) { <a class="btn" [href]="'/videos/' + j.file" [attr.download]="j.id + '.mp4'">Download</a> }
           <button type="button" (click)="reuse(j)">Reuse settings</button>
           @if (j.file && j.type !== 'stitch') { <button type="button" (click)="continueFrom(j)" title="Start a new clip from this clip's last frame">Continue from last frame</button> }
-          @if (canUpscale(j)) { <button type="button" (click)="upscale(j)" title="Sharpen this clip with an AI upscaler and save it as a new 768p video (free, runs on your GPU)">Upscale to 768p</button> }
+          @if (canUpscale(j)) {
+            <select class="upsel" aria-label="Upscaler model" (change)="setUpscaler($any($event.target).value)">
+              @for (u of upscalers(); track u.id) { <option [value]="u.id" [selected]="u.id === chosenUpscaler()" [title]="u.note">{{ u.label }}</option> }
+            </select>
+            <button type="button" (click)="upscale(j)" title="Sharpen this clip with the chosen AI upscaler and save it as a new 768p video (free, runs on your GPU)">Upscale to 768p</button>
+          }
           @if (j.status === 'processing' && (j.rawStatus === 'queued' || j.model === 'local-h3')) { <button type="button" (click)="cancelJob(j)">Cancel</button> }
           @if (j.upgrade; as up) {
             <button type="button" [title]="upgradeTitle(j)" (click)="upgrade(j)">Upgrade to 2K · ${{ up.total.toFixed(2) }}</button>

@@ -15,7 +15,7 @@ interface Ref {
   seconds?: number;
   character?: string; // who this reference belongs to (used to write the cast lines)
 }
-interface ModelInfo { label: string; minSeconds: number; rates: Record<string, number>; maxSeconds?: number; maxSecondsByRes?: Record<string, number>; ratios?: string[]; local?: boolean; canUpscale?: boolean }
+interface ModelInfo { label: string; minSeconds: number; rates: Record<string, number>; maxSeconds?: number; maxSecondsByRes?: Record<string, number>; ratios?: string[]; local?: boolean; canUpscale?: boolean; upscalers?: { id: string; label: string; perSecond: number; note: string }[] }
 interface Limits {
   prompt: number; referenceImages: number; videos: number; audios: number; totalFiles: number;
   clipMin: number; clipMax: number; videoTotalSeconds: number; audioTotalSeconds: number;
@@ -35,7 +35,7 @@ interface Job {
   refs?: StoredRef[]; refunded?: boolean;
   usage?: { output_seconds?: number; input_seconds?: number; total_seconds?: number; input_image_count?: number };
   failReason?: string | null; raw?: string; upgrade?: { lines: Line[]; total: number } | null; upgradedTo?: string;
-  hidden?: boolean; fileDeleted?: boolean; rawStatus?: string; progress?: { step: number; total: number; elapsed: number; eta: number; phase?: string }; upscaledTo?: string; sourceId?: string; startedAt?: string; meteredCost?: number; sources?: string[]; castBlock?: string;
+  hidden?: boolean; fileDeleted?: boolean; rawStatus?: string; progress?: { step: number; total: number; elapsed: number; eta: number; phase?: string }; upscaledTo?: string; sourceId?: string; upscaler?: string; startedAt?: string; meteredCost?: number; sources?: string[]; castBlock?: string;
 }
 // A reference as the server remembers it: a web link, or the name of an uploaded file it saved.
 interface StoredRef { type: RefType; role: Role; url?: string; file?: string; name?: string; seconds?: number; character?: string }
@@ -73,6 +73,10 @@ export class App implements OnInit {
 
   model = signal('MiniMax-H3');
   prompt = signal('');
+  // Which AI upscaler the "Upscale to 768p" buttons use (local clips only); remembered between visits.
+  upscaler = signal<string>((() => { try { return localStorage.getItem('kinowrap.upscaler') ?? ''; } catch { return ''; } })());
+  upscalers = computed(() => this.models()['local-h3']?.upscalers ?? []);
+  chosenUpscaler = computed(() => (this.upscalers().some((u) => u.id === this.upscaler()) ? this.upscaler() : this.upscalers()[0]?.id ?? ''));
   duration = signal(6);
   resolution = signal('768P');
   ratio = signal('9:16');
@@ -623,14 +627,25 @@ export class App implements OnInit {
   // Upscaling is only offered for finished 480p clips made by the local model, never for MiniMax jobs.
   canUpscale(job: Job) {
     return job.model === 'local-h3' && job.type !== 'upscale' && !!job.file && job.status === 'succeeded' && job.resolution === '480P'
-      && !job.upscaledTo && !!this.models()['local-h3']?.canUpscale;
+      && !!this.models()['local-h3']?.canUpscale;
+  }
+
+  setUpscaler(id: string) {
+    this.upscaler.set(id);
+    try { localStorage.setItem('kinowrap.upscaler', id); } catch { /* storage can be unavailable */ }
+  }
+
+  upscalerLabel(job: Job) {
+    return this.upscalers().find((u) => u.id === job.upscaler)?.label ?? '';
   }
 
   async upscale(job: Job) {
-    if (!confirm('Upscale this clip to 768p? It is free and runs on your GPU (usually under a minute), and the result is saved as a new clip.')) return;
+    const u = this.upscalers().find((x) => x.id === this.chosenUpscaler());
+    if (!u) return;
+    if (!confirm(`Upscale this clip to 768p with "${u.label}"? It is free and runs on your GPU (roughly ${this.fmtTime(u.perSecond * job.duration)} for this clip), and the result is saved as a new clip.`)) return;
     this.error.set('');
     try {
-      await firstValueFrom(this.http.post(`/api/jobs/${job.id}/upscale`, {}));
+      await firstValueFrom(this.http.post(`/api/jobs/${job.id}/upscale`, { model: u.id }));
       await Promise.all([this.loadStatus(), this.loadHistory()]);
       this.ensurePolling();
     } catch (e: any) {

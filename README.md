@@ -237,9 +237,17 @@ Generating at 768p is about 3.7 times slower than 480p and limited to 5 seconds.
 
 1. Download `realesrgan-ncnn-vulkan-20220424-windows.zip` (about 45 MB) from the [v0.2.5.0 release](https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0) (use the `ubuntu` zip on Linux).
 2. Unzip it so that `realesrgan-ncnn-vulkan.exe` and its `models` folder are in `h3-local	oolsesrgan` (or set `LOCAL_UPSCALER` to the program's path; the `models` folder must sit next to it).
-3. Restart Kinowrap. Finished **local 480p** clips now have an **Upscale to 768p** button.
+3. Restart Kinowrap. Finished **local 480p** clips now have an **Upscale to 768p** button with a model dropdown beside it.
 
-It uses the `realesr-animevideov3` model at 2x, scales the result to 1344×768 (or 768×1344), and keeps the original audio. The result is saved as a **new clip**; the original stays. A 5-second clip took about 9 seconds to upscale on an RTX 4060 laptop. The button is only shown for clips made by the local model, never for MiniMax jobs.
+Pick a model in the dropdown (your choice is remembered). The three models in the package are:
+
+| Model | Best for | Speed (RTX 4060 laptop, per second of video) |
+|---|---|---|
+| Anime / video (`realesr-animevideov3`, 2x) | animation and clean footage; made for video | about 3 s |
+| Anime / illustration (`realesrgan-x4plus-anime`, 4x) | smooth lines and flat colour | about 16 s |
+| Live-action / photo (`realesrgan-x4plus`, 4x) | real-looking footage; keeps the most texture | about 45 s |
+
+The result is scaled to 1344×768 (or 768×1344), keeps the original audio, and is saved as a **new clip**, so you can upscale the same clip with a different model to compare. The button is only shown for clips made by the local model, never for MiniMax jobs. Other Real-ESRGAN models exist; to add one, put its ncnn `.param`/`.bin` files in the `models` folder and add it to `UPSCALER_CHOICES` in `server/server.mjs`.
 
 This sharpens and cleans the picture, but it can't invent detail that the 480p clip never had, so expect it to look better than a plain resize and not like a native 768p generation. It also works frame by frame, so fine textures can shimmer slightly between frames.
 
