@@ -174,7 +174,16 @@ def main():
     )
     print(f"LOAD_SECONDS {time.time() - t0:.1f}", flush=True)
 
+    step_times = []
     steps_t = {"start": time.time(), "last": time.time()}
+
+    def avg_step():
+        # The first step includes warm-up, so once there is a second one, ignore the first.
+        return sum(step_times[1:]) / len(step_times[1:]) if len(step_times) > 1 else step_times[0]
+
+    def fmt(sec):
+        sec = int(round(sec))
+        return f"{sec // 3600}h {sec % 3600 // 60}m" if sec >= 3600 else f"{sec // 60}m {sec % 60:02d}s"
 
     def progress(timesteps):
         total = len(timesteps)
@@ -182,8 +191,12 @@ def main():
         for i, t in enumerate(timesteps):
             yield t
             now = time.time()
-            print(f"STEP {i + 1}/{total} {now - steps_t['last']:.1f}s", flush=True)
+            step_times.append(now - steps_t["last"])
             steps_t["last"] = now
+            elapsed = now - steps_t["start"]
+            eta = (total - i - 1) * avg_step()
+            print(f"STEP {i + 1}/{total} {step_times[-1]:.1f}s elapsed {elapsed:.0f}s eta {eta:.0f}s"
+                  f"  [{fmt(elapsed)} elapsed, about {fmt(eta)} left]", flush=True)
 
     extra = {}
     if a.first or a.last:
@@ -206,6 +219,9 @@ def main():
     write_video_audio(video=video, audio=audio, output_path=out, fps=FPS, audio_sample_rate=32000)
     print(f"PEAK_VRAM_GB {torch.cuda.max_memory_allocated() / 1024 ** 3:.2f}", flush=True)
     print(f"TOTAL_SECONDS {time.time() - t0:.1f}", flush=True)
+    if step_times:
+        sa = avg_step()
+        print(f"TIMING step_seconds {sa:.2f} overhead_seconds {max(0.0, time.time() - t0 - sa * len(step_times)):.1f}", flush=True)
     print(f"DONE {os.path.abspath(out)}", flush=True)
 
 

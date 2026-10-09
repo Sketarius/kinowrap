@@ -228,6 +228,12 @@
           <div><span>{{ l.label }}</span><span>${{ l.cost.toFixed(2) }}</span></div>
         }
         <div class="total"><span>Total</span><span>${{ e.total.toFixed(2) }}</span></div>
+        @if (isLocal()) {
+          <p class="hint">
+            @if (e.localEta; as t) { Rough run time: about {{ fmtTime(t.seconds) }}, from your last {{ t.duration }}s job of this kind. }
+            @else { No timing yet for this kind of job. The first one measures it, and later ones show a guess here. }
+          </p>
+        }
       </div>
     }
 
@@ -316,7 +322,15 @@
           <p class="hint">Local video file deleted.</p>
         } @else if (j.status === 'processing') {
           @if (j.model === 'local-h3') {
-            <p class="hint">{{ j.progress ? 'Step ' + j.progress.step + ' of ' + j.progress.total : j.rawStatus === 'running' ? 'Starting (the first step is slow)…' : 'Waiting for its turn…' }} Checks every 10s.</p>
+            @if (j.progress; as p) {
+              <progress [value]="p.step" [max]="p.total"></progress>
+              <p class="hint">Step {{ p.step }} of {{ p.total }} · {{ fmtTime(p.elapsed) }} elapsed ·
+                {{ p.step < p.total ? 'about ' + fmtTime(p.eta) + ' left' : 'decoding and saving…' }}</p>
+            } @else if (j.rawStatus === 'running') {
+              <p class="hint">Starting, {{ since(j.startedAt) }} so far (the first step is slow, and shows a time estimate once it finishes).</p>
+            } @else {
+              <p class="hint">Waiting for its turn…</p>
+            }
           } @else {
             <p class="hint">Generating… checks every 10s.</p>
           }
