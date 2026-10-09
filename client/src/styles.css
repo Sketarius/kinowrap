@@ -1,0 +1,26 @@
+:root {
+  color-scheme: dark;
+  --bg: #0a0614;
+  --bg-glow: #2b1259;
+  --card: #130b24;
+  --card-border: #2f2050;
+  --text: #e8e1f7;
+  --muted: #8f80b3;
+  --purple: #b79cff;
+  --purple-2: #7c3aed;
+  --purple-soft: #1e1338;
+  --input-bg: #0e0819;
+  --input-border: #3a2868;
+  --danger: #ff7d92;
+}
+html { min-height: 100%; }
+body {
+  margin: 0;
+  color: var(--text);
+  background:
+    radial-gradient(900px 420px at 50% -8%, var(--bg-glow), transparent 70%),
+    radial-gradient(600px 400px at 100% 100%, rgba(124, 58, 237, .12), transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
+}
+::selection { background: var(--purple-2); color: #fff; }

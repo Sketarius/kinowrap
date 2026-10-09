@@ -1,0 +1,14 @@
+# Secrets and your own data: never commit these
+.env
+.env.*
+!.env.example
+server/data/
+
+# Dependencies and build output
+node_modules/
+dist/
+.angular/
+
+# Logs and OS files
+*.log
+.DS_Store

@@ -1,0 +1,343 @@
+<main>
+  <datalist id="chars">
+    @for (c of characterNames(); track c) { <option [value]="c"></option> }
+  </datalist>
+  <header>
+    <h1>Kinowrap</h1>
+    @if (status(); as s) {
+      <button type="button" class="budget" [class.low]="s.remaining < 3" (click)="setBalance()"
+              title="Click to set your real balance from the MiniMax billing page">
+        @if (s.syncedAt) {
+          ≈ ${{ s.remaining.toFixed(2) }} left · synced {{ s.syncedAt | date: 'MMM d, h:mm a' }}
+        } @else {
+          Estimate: ${{ s.remaining.toFixed(2) }} left of ${{ s.maxSpend }} · click to set real balance
+        }
+      </button>
+    }
+  </header>
+
+  @if (lowBalance()) {
+    <div class="banner">Low balance: about ${{ status()!.remaining.toFixed(2) }} left. Top up on the MiniMax billing page, then click the balance pill to re-sync.</div>
+  }
+  @if (status(); as s) {
+    @if (s.maxDaily) { <p class="hint">Today: ${{ s.spentToday.toFixed(2) }} of your ${{ s.maxDaily }} daily limit</p> }
+  }
+
+  <details class="card insights" (toggle)="onInsightsToggle($event)">
+    <summary>Insights &amp; reconcile</summary>
+    @if (stats(); as st) {
+      <p><span class="big">${{ st.totals.spent.toFixed(2) }}</span> counted · {{ st.totals.jobs }} jobs · average ${{ st.totals.avgPerSecond.toFixed(3) }} per second</p>
+      @if (st.totals.failed) {
+        <p class="hint">{{ st.totals.failed }} failed job(s) are counted as ${{ st.totals.failedCost.toFixed(2) }}. They may not have been charged.</p>
+      }
+      <h3>By day</h3>
+      @for (d of st.byDay; track d.day) {
+        <div class="bar"><span>{{ d.day }}</span><div class="track"><div class="fill" [style.width.%]="(d.spent / dayMax()) * 100"></div></div><span>${{ d.spent.toFixed(2) }}</span></div>
+      }
+      <h3>By model</h3>
+      @for (m of st.byModel; track m.model) {
+        <div class="bar"><span>{{ models()[m.model]?.label ?? m.model }}</span><span class="hint">{{ m.jobs }} jobs · {{ m.seconds }}s</span><span>${{ m.spent.toFixed(2) }}</span></div>
+      }
+    } @else {
+      <p class="hint">Loading…</p>
+    }
+
+    <div class="row">
+      <button type="button" [disabled]="reconciling()" (click)="reconcile()">{{ reconciling() ? 'Checking…' : 'Reconcile with MiniMax' }}</button>
+      <span class="hint">Read-only. Compares the last 7 days with MiniMax's own task records. Nothing is billed.</span>
+    </div>
+    @if (report(); as r) {
+      <div class="report">
+        <p>Checked {{ r.checked }} tasks · {{ r.matched }} matched · {{ r.updated }} status updates</p>
+        @if (r.mismatches.length) {
+          <p><strong>Cost differences</strong></p>
+          <ul>@for (m of r.mismatches; track m.id) { <li>{{ m.id }}: app says ${{ m.ledger.toFixed(2) }}, MiniMax metered ${{ m.metered.toFixed(2) }}</li> }</ul>
+        } @else {
+          <p class="hint">No cost differences found.</p>
+        }
+        @if (r.notInLedger.length) {
+          <p><strong>Tasks not made in this app</strong> (not counted in your spend)</p>
+          <ul>@for (n of r.notInLedger; track n.id) { <li>{{ n.id }}: {{ n.status }} · {{ n.duration }}s {{ n.resolution }}@if (n.meteredCost !== null) { · metered ${{ n.meteredCost.toFixed(2) }} }</li> }</ul>
+        }
+        @if (r.failedUnmetered.length) {
+          <p><strong>{{ r.failedUnmetered.length }} failed job(s) MiniMax metered nothing for.</strong> They were probably free, but confirm on the billing page.</p>
+          <button type="button" (click)="markUnmetered()">Mark as not charged</button>
+        }
+      </div>
+    }
+  </details>
+
+  <section class="card">
+    <label>Prompt
+      <textarea rows="5" placeholder="Describe the video…" [value]="prompt()" (input)="setPrompt($any($event.target).value)"></textarea>
+    </label>
+    @if (limits(); as lim) {
+      <div class="count" [class.over]="effectivePrompt().length > lim.prompt">{{ effectivePrompt().length }} / {{ lim.prompt }}@if (castBlock()) { <span> (includes cast lines)</span> }</div>
+    }
+
+    <details class="library">
+      <summary>Library ({{ library().length }})</summary>
+      <div class="row">
+        <button type="button" (click)="savePrompt()">Save current prompt</button>
+        <button type="button" (click)="saveRefSet()">Save current references as a set</button>
+      </div>
+      @for (it of library(); track it.id) {
+        <div class="libitem">
+          <span class="tag">{{ it.kind === 'prompt' ? 'prompt' : 'references' }}</span>
+          @if (it.kind === 'prompt' && it.refs?.length) { <span class="hint">+ {{ it.refs!.length }} ref(s)</span> }
+          <span class="libname">{{ it.name }}</span>
+          <button type="button" (click)="useItem(it)">Use</button>
+          <button type="button" (click)="deleteItem(it)">Delete</button>
+        </div>
+      } @empty {
+        <p class="hint">Save prompts you reuse and reference sets like a character sheet. Reference sets keep their URLs (uploaded files too, if small).</p>
+      }
+    </details>
+
+    <div class="row">
+      <label>Model
+        <select (change)="setModel($any($event.target).value)">
+          @for (m of modelKeys(); track m) {
+            <option [value]="m" [selected]="m === model()">{{ models()[m].label }}</option>
+          }
+        </select>
+      </label>
+      <label>Resolution
+        <select (change)="set('resolution', $any($event.target).value)">
+          @for (r of resolutions(); track r) {
+            <option [value]="r" [selected]="r === resolution()">{{ r }} (${{ modelInfo()!.rates[r].toFixed(2) }}/s)</option>
+          }
+        </select>
+      </label>
+      <label>Aspect ratio
+        <select [disabled]="mode() === 'i2v'" (change)="set('ratio', $any($event.target).value)">
+          @for (r of ratioOptions(); track r) {
+            <option [value]="r" [selected]="r === effectiveRatio()">{{ r === 'adaptive' ? 'Adaptive (from image)' : r }}</option>
+          }
+        </select>
+      </label>
+      <label title="How much MiniMax rewrites your prompt before generating. Balanced is MiniMax's default.">Prompt expansion
+        <select (change)="set('expansion', $any($event.target).value)">
+          @for (x of status()?.expansion ?? ['balanced']; track x) {
+            <option [value]="x" [selected]="x === expansion()">{{ x }}</option>
+          }
+        </select>
+      </label>
+    </div>
+
+    <label>Length: {{ duration() }}s <span class="hint">({{ modelInfo()?.label }} allows {{ minSeconds() }}–15s)</span>
+      <input type="range" [min]="minSeconds()" max="15" [value]="duration()" (input)="set('duration', $any($event.target).value)" />
+    </label>
+
+    <p class="modeline">Mode: <strong>{{ modeLabel() }}</strong>
+      @if (mode() === 'i2v') { <span class="hint"> · aspect ratio follows your image</span> }
+      @if (mode() === 't2v') { <span class="hint"> · add an image below to guide it</span> }
+    </p>
+
+    <details>
+      <summary>References ({{ refs().length }})</summary>
+      <p class="hint">
+        Images, video and audio can be added as a public URL (most reliable) or uploaded from disk (sent inline).
+        Use <strong>either</strong> first/last frame <strong>or</strong> reference media, not both.
+        Reference audio is free; reference video is billed per second. To use a reference, mention it in the prompt, e.g. "Image 1 as the main character".
+      </p>
+
+      <div class="slot">
+        <span class="slot-title">First frame</span>
+        <input placeholder="https://… image URL" [value]="pending()['first_frame'] ?? ''" (input)="setPending('first_frame', $any($event.target).value)" (keydown.enter)="commitPending('first_frame')" />
+        <button type="button" (click)="commitPending('first_frame')">Add URL</button>
+        <input type="file" accept="image/*" (change)="addImageFile('first_frame', $event)" />
+      </div>
+      <div class="slot">
+        <span class="slot-title">Last frame</span>
+        <input placeholder="https://… image URL" [value]="pending()['last_frame'] ?? ''" (input)="setPending('last_frame', $any($event.target).value)" (keydown.enter)="commitPending('last_frame')" />
+        <button type="button" (click)="commitPending('last_frame')">Add URL</button>
+        <input type="file" accept="image/*" (change)="addImageFile('last_frame', $event)" />
+      </div>
+      <div class="slot">
+        <span class="slot-title">Reference images</span>
+        <input placeholder="https://… image URL" [value]="pending()['reference_image'] ?? ''" (input)="setPending('reference_image', $any($event.target).value)" (keydown.enter)="commitPending('reference_image')" />
+        <button type="button" (click)="commitPending('reference_image')">Add URL</button>
+        <input type="file" accept="image/*" multiple (change)="addImageFile('reference_image', $event)" />
+      </div>
+      <div class="slot">
+        <span class="slot-title">Reference video</span>
+        <div class="inline">
+          <input #vurl placeholder="https://… .mp4 / .mov URL" />
+          <input #vsecs type="number" min="2" max="15" placeholder="secs" class="narrow" title="Clip length in seconds (2–15)" />
+        </div>
+        <button type="button" (click)="addUrl('video', 'reference_video', vurl, vsecs)">Add URL</button>
+        <input type="file" accept="video/mp4,video/quicktime" (change)="addMediaFile('video', $event)" />
+      </div>
+      <div class="slot">
+        <span class="slot-title">Reference audio</span>
+        <div class="inline">
+          <input #aurl placeholder="https://… .mp3 / .wav URL (free)" />
+          <input #asecs type="number" min="2" max="15" placeholder="secs" class="narrow" title="Optional: clip length in seconds (2–15)" />
+        </div>
+        <button type="button" (click)="addUrl('audio', 'reference_audio', aurl, asecs)">Add URL</button>
+        <input type="file" accept="audio/mpeg,audio/wav,audio/x-wav" (change)="addMediaFile('audio', $event)" />
+      </div>
+
+      @if (refs().length) {
+        <div class="reflist">
+          @for (r of refs(); track $index) {
+            <div class="refitem" [title]="refTitle(r)">
+              @if (r.type === 'image') {
+                <img class="thumb" [src]="r.url" alt="" loading="lazy" referrerpolicy="no-referrer" />
+              } @else {
+                <span class="thumb icon">{{ r.type === 'video' ? '🎞' : '♪' }}</span>
+              }
+              <div class="refinfo">
+                <span class="refname">{{ displayName(r) }}</span>
+                <span class="hint">{{ r.role.replace('_', ' ') }}@if (r.seconds) { · {{ r.seconds }}s }</span>
+              </div>
+              @if (numbers()[$index]; as num) {
+                <span class="numtag" title="MiniMax counts references by type, in this list order">{{ num.label }}</span>
+                <input class="char" list="chars" placeholder="Character…" title="Who is this? Give a character's image and voice the same name."
+                       [value]="r.character ?? ''" (input)="setCharacter($index, $any($event.target).value)" />
+              }
+              <div class="mv">
+                <button type="button" (click)="moveRef($index, -1)" title="Move up">▲</button>
+                <button type="button" (click)="moveRef($index, 1)" title="Move down">▼</button>
+              </div>
+              <button type="button" class="x" (click)="removeRef($index)" title="Remove">×</button>
+            </div>
+          }
+        </div>
+      }
+
+      @if (refs().length) {
+        <div class="cast">
+          <label class="check"><input type="checkbox" [checked]="useCast()" (change)="useCast.set($any($event.target).checked)" /> Write the cast lines into the start of the prompt for me</label>
+          @if (castBlock()) {
+            <pre class="castpreview">{{ castBlock() }}</pre>
+          } @else if (useCast()) {
+            <p class="hint">Type a character name on each reference above (say <strong>Alice</strong> on Alice's image and on Alice's voice). The app then writes lines like "Image 1 shows Alice" and "Audio 2 is Alice's voice" so MiniMax can't mix them up.</p>
+          }
+          @if (castNotes().length) {
+            <ul class="notes">@for (n of castNotes(); track n) { <li>{{ n }}</li> }</ul>
+          }
+        </div>
+      }
+    </details>
+
+    @if (estimate(); as e) {
+      <div class="estimate">
+        @for (l of e.lines; track l.label) {
+          <div><span>{{ l.label }}</span><span>${{ l.cost.toFixed(2) }}</span></div>
+        }
+        <div class="total"><span>Total</span><span>${{ e.total.toFixed(2) }}</span></div>
+      </div>
+    }
+
+    <p class="refline" [class.none]="!refs().length && !pendingCount()">
+      @if (refs().length) {
+        ✓ {{ refs().length }} reference(s) attached
+        @for (r of refs(); track $index) { <span class="tag">{{ r.role.replace('_', ' ') }}</span> }
+      } @else if (pendingCount()) {
+        ↑ You typed a URL but haven't clicked Add URL — it will be included when you generate.
+      } @else {
+        No references attached
+      }
+    </p>
+
+    @if (problems().length) {
+      <ul class="problems">
+        @for (p of problems(); track p) { <li>{{ p }}</li> }
+      </ul>
+    }
+    @if (error()) { <p class="error">{{ error() }}</p> }
+
+    <button class="go" [disabled]="!canGenerate()" (click)="generate()">
+      {{ busy() ? 'Submitting…' : 'Generate' + (estimate() ? ' — $' + estimate()!.total.toFixed(2) : '') }}
+    </button>
+  </section>
+
+  <section>
+    <h2>History</h2>
+    <div class="filters">
+      <input placeholder="Search prompts…" [value]="search()" (input)="search.set($any($event.target).value); visibleCount.set(10)" />
+      <select (change)="statusFilter.set($any($event.target).value); visibleCount.set(10)">
+        @for (o of ['all', 'succeeded', 'failed', 'processing', 'cancelled']; track o) { <option [value]="o" [selected]="o === statusFilter()">{{ o === 'all' ? 'Any status' : o }}</option> }
+      </select>
+      <select (change)="modelFilter.set($any($event.target).value); visibleCount.set(10)">
+        <option value="all" [selected]="modelFilter() === 'all'">Any model</option>
+        @for (m of modelKeys(); track m) { <option [value]="m" [selected]="m === modelFilter()">{{ models()[m].label }}</option> }
+        <option value="local" [selected]="modelFilter() === 'local'">Stitched</option>
+      </select>
+      <label class="check"><input type="checkbox" [checked]="showHidden()" (change)="showHidden.set($any($event.target).checked)" /> Show hidden ({{ hiddenCount() }})</label>
+    </div>
+
+    @if (selected().length) {
+      <div class="stitchbar">
+        <span>{{ selected().length }} clip(s) selected, joined in the order you ticked them</span>
+        <button type="button" [disabled]="selected().length < 2 || stitching()" (click)="stitchSelected()">{{ stitching() ? 'Stitching…' : 'Stitch selected' }}</button>
+        <button type="button" (click)="selected.set([])">Clear</button>
+      </div>
+    }
+
+    @for (j of visibleJobs(); track j.id) {
+      <article class="card job" [class.dim]="j.hidden">
+        <div class="meta">
+          @if (j.file) { <input type="checkbox" class="pick" [checked]="isSelected(j)" (change)="toggleSelect(j)" title="Select for stitching" /> }
+          <strong>{{ j.status }}</strong>
+          @if (j.type === 'upgrade') { · <span class="tag">2K upgrade</span> }
+          · {{ modelLabel(j) }} {{ j.duration }}s {{ j.resolution }}@if (j.ratio) { · {{ j.ratio }} } · ${{ j.cost.toFixed(2) }}
+          @if (j.type !== 'stitch') { · {{ j.refs?.length ? j.refs!.length + ' reference(s) sent' : 'no references' }} }
+          @if (j.hidden) { · <em>hidden</em> }
+          @if (j.refunded) { · <em>not charged</em> }
+          @if (usageText(j)) { · <span class="hint">{{ usageText(j) }}</span> }
+        </div>
+        <p>{{ j.prompt }}</p>
+
+        @if (j.refs?.length && j.type !== 'stitch') {
+          <details class="refs">
+            <summary>{{ j.refs!.length }} reference(s) used</summary>
+            @for (r of j.refs; track $index) {
+              <div class="refrow">
+                <span class="tag">{{ r.role.replace('_', ' ') }}</span>
+                @if (r.url) { <a [href]="r.url" target="_blank" rel="noopener">{{ r.url }}</a> }
+                @else if (r.file) { <a [href]="'/refs/' + r.file" target="_blank">{{ r.name || r.file }}</a> <span class="hint">(saved copy)</span> }
+                @else { <span class="hint">not saved</span> }
+              </div>
+            }
+          </details>
+        }
+
+        @if (j.status === 'failed') {
+          <p class="error">{{ j.failReason || 'MiniMax gave no reason for this failure.' }}</p>
+          @if (j.raw) { <details><summary>Raw reply</summary><pre>{{ j.raw }}</pre></details> }
+        }
+
+        @if (j.file) {
+          <video controls preload="metadata" [src]="'/videos/' + j.file"></video>
+        } @else if (j.fileDeleted) {
+          <p class="hint">Local video file deleted.</p>
+        } @else if (j.status === 'processing') {
+          <p class="hint">Generating… checks every 10s.</p>
+        }
+
+        <div class="actions">
+          @if (j.file) { <a class="btn" [href]="'/videos/' + j.file" [attr.download]="j.id + '.mp4'">Download</a> }
+          <button type="button" (click)="reuse(j)">Reuse settings</button>
+          @if (j.file && j.type !== 'stitch') { <button type="button" (click)="continueFrom(j)" title="Start a new clip from this clip's last frame">Continue from last frame</button> }
+          @if (j.status === 'processing' && j.rawStatus === 'queued') { <button type="button" (click)="cancelJob(j)">Cancel</button> }
+          @if (j.upgrade; as up) {
+            <button type="button" [title]="upgradeTitle(j)" (click)="upgrade(j)">Upgrade to 2K · ${{ up.total.toFixed(2) }}</button>
+          }
+          @if (j.status === 'failed' || j.refunded) {
+            <button type="button" (click)="toggleRefunded(j)">{{ j.refunded ? 'Count as charged' : 'Mark not charged' }}</button>
+          }
+          @if (j.file) { <button type="button" (click)="deleteFile(j)">Delete file</button> }
+          <button type="button" (click)="hideJob(j)">{{ j.hidden ? 'Unhide' : 'Hide' }}</button>
+        </div>
+      </article>
+    } @empty {
+      <p class="hint">Nothing here yet.</p>
+    }
+    @if (filteredJobs().length > visibleCount()) {
+      <button type="button" class="more" (click)="visibleCount.set(visibleCount() + 10)">Show 10 more ({{ filteredJobs().length - visibleCount() }} left)</button>
+    }
+  </section>
+</main>

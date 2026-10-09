@@ -1,0 +1,14 @@
+{
+  "name": "kinowrap",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup": "npm --prefix client install",
+    "start": "node start.mjs"
+  },
+  "description": "A local web app for making AI video with MiniMax's video API, with price previews and a spending ledger.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.6"
+  }
+}
