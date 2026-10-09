@@ -145,3 +145,4 @@ video { width: 100%; border-radius: 12px; margin-top: 12px; background: #000; }
 .castpreview { margin: 10px 0 0; padding: 10px 12px; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; background: var(--input-bg); border-radius: 8px; color: var(--text); }
 .notes { margin: 10px 0 0; padding-left: 20px; font-size: 13px; color: var(--muted); }
 @media (max-width: 640px) { .refitem { flex-wrap: wrap; } .char { width: 100%; order: 5; } }
+.upsel { padding: 6px; font-size: 13px; }

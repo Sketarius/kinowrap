@@ -27,7 +27,22 @@ const MAX_DAILY = Number(process.env.MAX_DAILY_USD || 0); // 0 = no daily cap
 // Optional local provider: a folder containing h3.py and a venv (see README). Off when the folder isn't there.
 const LOCAL_H3_DIR = process.env.LOCAL_H3_DIR || path.join(__dirname, '..', '..', 'h3-local');
 const LOCAL_H3_SCRIPT = path.join(LOCAL_H3_DIR, 'h3.py');
+// Optional ncnn/Vulkan upscaler programs, used to upscale finished local 480p clips to 768p. Each lives in its own folder under
+// LOCAL_UPSCALERS_DIR (esrgan/, realcugan/, waifu2x/). A choice only shows up when its program and model files are there.
+const LOCAL_UPSCALERS_DIR = process.env.LOCAL_UPSCALERS_DIR || path.join(LOCAL_H3_DIR, 'tools');
 const LOCAL_H3_PYTHON = path.join(LOCAL_H3_DIR, 'venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+const exe = (name) => (process.platform === 'win32' ? `${name}.exe` : name);
+// `perSecond` is roughly how long one second of video takes on an RTX 4060 laptop. `args` are the program's own options.
+const UPSCALER_CHOICES = [
+  { id: 'realesr-animevideov3', label: 'Anime / video (fast)', dir: 'esrgan', program: 'realesrgan-ncnn-vulkan', scale: 2, args: ['-n', 'realesr-animevideov3', '-s', '2', '-m', 'models'], need: 'models/realesr-animevideov3-x2.param', perSecond: 3, note: 'Real-ESRGAN, made for video. Fast; good for animation and clean footage.' },
+  { id: 'realcugan-conservative', label: 'Anime, faithful (Real-CUGAN)', dir: 'realcugan', program: 'realcugan-ncnn-vulkan', scale: 2, args: ['-n', '-1', '-s', '2', '-m', 'models-se'], need: 'models-se/up2x-conservative.param', perSecond: 3, note: 'Conservative: stays close to the original drawing, so it looks the least processed.' },
+  { id: 'realcugan-denoise', label: 'Anime, cleaned up (Real-CUGAN)', dir: 'realcugan', program: 'realcugan-ncnn-vulkan', scale: 2, args: ['-n', '2', '-s', '2', '-m', 'models-se'], need: 'models-se/up2x-denoise2x.param', perSecond: 3, note: 'Also removes noise and compression blocks; slightly more smoothing.' },
+  { id: 'waifu2x-cunet', label: 'Anime, gentle (waifu2x)', dir: 'waifu2x', program: 'waifu2x-ncnn-vulkan', scale: 2, args: ['-n', '1', '-s', '2', '-m', 'models-cunet'], need: 'models-cunet/noise1_scale2.0x_model.param', perSecond: 5, note: 'The classic anime upscaler: clean lines, little invented detail.' },
+  { id: 'realesrgan-x4plus-anime', label: 'Anime / illustration (Real-ESRGAN, medium)', dir: 'esrgan', program: 'realesrgan-ncnn-vulkan', scale: 4, args: ['-n', 'realesrgan-x4plus-anime', '-s', '4', '-m', 'models'], need: 'models/realesrgan-x4plus-anime.param', perSecond: 16, note: 'Smooth lines and flat colour.' },
+  { id: 'realesrgan-x4plus', label: 'Live-action / photo (Real-ESRGAN, slow)', dir: 'esrgan', program: 'realesrgan-ncnn-vulkan', scale: 4, args: ['-n', 'realesrgan-x4plus', '-s', '4', '-m', 'models'], need: 'models/realesrgan-x4plus.param', perSecond: 45, note: 'General photo model; keeps the most texture.' },
+];
+const upscalerExe = (u) => path.join(LOCAL_UPSCALERS_DIR, u.dir, exe(u.program));
+const upscalersAvailable = () => UPSCALER_CHOICES.filter((u) => existsSync(upscalerExe(u)) && existsSync(path.join(LOCAL_UPSCALERS_DIR, u.dir, u.need)));
 const LOCAL_H3_STEPS = Number(process.env.LOCAL_H3_STEPS || 20);
 const LOCAL_H3_MAX_SECONDS = Number(process.env.LOCAL_H3_MAX_SECONDS || 10);
 const LOCAL = 'local-h3';
@@ -61,7 +76,7 @@ const MODELS = {
 // Local H3 on your own GPU: free, slow, one job at a time.
 if (existsSync(LOCAL_H3_SCRIPT) && existsSync(LOCAL_H3_PYTHON)) {
   MODELS[LOCAL] = {
-    label: 'Local (free, slow)', local: true, minSeconds: 1, maxSeconds: LOCAL_H3_MAX_SECONDS,
+    label: 'Local (free, slow)', local: true, upscalers: upscalersAvailable().map(({ id, label, perSecond, note }) => ({ id, label, perSecond, note })), canUpscale: upscalersAvailable().length > 0, minSeconds: 1, maxSeconds: LOCAL_H3_MAX_SECONDS,
     rates: { '480P': 0, '768P': 0 }, maxSecondsByRes: { '768P': Math.min(5, LOCAL_H3_MAX_SECONDS) },
     refVideoRates: {}, freeImages: 0, extraImage: 0, ratios: ['16:9', '9:16'],
   };
@@ -425,6 +440,67 @@ async function updateJob(id, fn) {
   if (job) { fn(job); await writeLedger(l); }
 }
 
+// Upscale a finished local 480p clip to 768p: extract frames, Real-ESRGAN x2, scale to 1344x768 (or 768x1344), re-encode with the original audio.
+async function runUpscale(id, job, ledger) {
+  const src = ledger.jobs.find((j) => j.id === job.sourceId);
+  const dir = path.join(DATA_DIR, 'local', id);
+  const out = path.join(OUT_DIR, `${id}.mp4`);
+  const cancelled = () => localCancelled.has(id);
+  let error = null;
+  localRunning = { id, child: null };
+  try {
+    if (!src?.file) throw new Error('The source clip is no longer on disk.');
+    const input = path.join(OUT_DIR, src.file);
+    await fs.mkdir(path.join(dir, 'in'), { recursive: true });
+    await fs.mkdir(path.join(dir, 'out'), { recursive: true });
+    await run('ffmpeg', ['-y', '-v', 'error', '-i', input, path.join(dir, 'in', '%05d.png')]);
+    if (cancelled()) throw new Error('cancelled');
+    const started = Date.now();
+    await new Promise((resolve, reject) => {
+      const choice = UPSCALER_CHOICES.find((u) => u.id === job.upscaler);
+      const child = spawn(upscalerExe(choice), ['-i', path.join(dir, 'in'), '-o', path.join(dir, 'out'), ...choice.args, '-f', 'png'], { cwd: path.join(LOCAL_UPSCALERS_DIR, choice.dir), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      localRunning.child = child;
+      const onData = (d) => {
+        const pcts = [...d.toString().matchAll(/(\d+(?:\.\d+)?)%/g)].map((m) => Number(m[1]));
+        if (!pcts.length) return;
+        const pct = Math.max(...pcts);
+        const elapsed = (Date.now() - started) / 1000;
+        localProgress.set(id, { step: Math.round(pct), total: 100, elapsed: Math.round(elapsed), eta: pct > 0 ? Math.round((elapsed * (100 - pct)) / pct) : 0, phase: 'upscale' });
+      };
+      child.stdout.on('data', onData);
+      child.stderr.on('data', onData);
+      child.on('error', reject);
+      child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`The upscaler exited with code ${code}.`))));
+    });
+    if (cancelled()) throw new Error('cancelled');
+    await run('ffmpeg', ['-y', '-v', 'error', '-framerate', '24', '-i', path.join(dir, 'out', '%05d.png'), '-i', input, '-map', '0:v', '-map', '1:a?',
+      '-vf', "scale='if(gt(iw,ih),1344,768)':'if(gt(iw,ih),768,1344)':flags=lanczos", '-c:v', 'libx264', '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'copy', '-shortest', out]);
+  } catch (e) {
+    error = e;
+  }
+  localRunning = null;
+  localProgress.delete(id);
+  fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+  const wasCancelled = localCancelled.delete(id);
+  const ok = !error && existsSync(out);
+  const l = await readLedger();
+  const job2 = l.jobs.find((j) => j.id === id);
+  if (job2) {
+    if (wasCancelled) job2.status = 'cancelled';
+    else {
+      job2.status = ok ? 'succeeded' : 'failed';
+      job2.rawStatus = job2.status;
+      if (ok) {
+        job2.file = `${id}.mp4`;
+        const s = l.jobs.find((j) => j.id === job2.sourceId);
+        if (s) s.upscaledTo = id;
+      } else job2.failReason = error?.stderr?.toString().trim().split('\n').pop() || error?.message || 'Upscaling failed.';
+    }
+    await writeLedger(l).catch(() => {});
+  }
+  runNextLocal();
+}
+
 function runNextLocal() {
   if (localRunning || !localQueue.length) return;
   const id = localQueue.shift();
@@ -434,6 +510,7 @@ function runNextLocal() {
     job.rawStatus = 'running';
     job.startedAt = new Date().toISOString();
     await writeLedger(l);
+    if (job.type === 'upscale') return runUpscale(id, job, l);
     const out = path.join(OUT_DIR, `${id}.mp4`);
     const args = ['-u', LOCAL_H3_SCRIPT, '--seconds', String(job.duration), '--steps', String(job.steps), '--seed', String(job.seed), '--res', job.resolution === '768P' ? '768' : '480', '--out', out];
     if (job.ratio === '9:16') args.push('--vertical');
@@ -510,6 +587,7 @@ async function stageLocalInputs(id, refs) {
 }
 
 function killLocal(child) {
+  if (!child) return; // an upscale between its steps has no process to stop; it checks the cancel flag instead
   if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
   else child.kill('SIGTERM');
 }
@@ -894,13 +972,33 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { remaining: remainingOf(l) });
     }
     // Per-job actions.
-    const action = url.pathname.match(/^\/api\/jobs\/([^/]+)\/(cancel|hide|delete-file|last-frame)$/);
+    const action = url.pathname.match(/^\/api\/jobs\/([^/]+)\/(cancel|hide|delete-file|last-frame|upscale)$/);
     if (req.method === 'POST' && action) {
       const [, id, what] = action;
       const l = await readLedger();
       const job = l.jobs.find((j) => j.id === id);
       if (!job) return send(res, 404, { error: 'Job not found.' });
 
+      if (what === 'upscale') { // local clips only; MiniMax jobs have their own 2K upgrade
+        if (job.model !== LOCAL || job.type === 'upscale') return send(res, 400, { error: 'Only clips made by the local model can be upscaled here.' });
+        if (!MODELS[LOCAL]?.canUpscale) return send(res, 400, { error: 'The upscaler is not installed (see the README).' });
+        if (job.status !== 'succeeded' || !job.file || job.resolution !== '480P') return send(res, 400, { error: 'Only finished 480p local clips can be upscaled.' });
+        const { model: chosen } = await readBody(req);
+        const upscaler = chosen || MODELS[LOCAL].upscalers[0].id;
+        if (!MODELS[LOCAL].upscalers.some((u) => u.id === upscaler)) return send(res, 400, { error: `Unknown or missing upscaler model: ${upscaler}.` });
+        if (l.jobs.some((j) => j.type === 'upscale' && j.sourceId === job.id && j.upscaler === upscaler && ['processing', 'succeeded'].includes(j.status))) {
+          return send(res, 409, { error: 'This clip already has an upscale with that model (or one is in progress). Pick another model to compare.' });
+        }
+        const newId = `local-up-${Date.now()}`;
+        l.jobs.push({
+          id: newId, type: 'upscale', upscaler, sourceId: job.id, model: LOCAL, mode: job.mode, prompt: job.prompt, cost: 0, resolution: '768P',
+          duration: job.duration, ratio: job.ratio, status: 'processing', rawStatus: 'queued', file: null, createdAt: new Date().toISOString(), refs: [],
+        });
+        await writeLedger(l);
+        localQueue.push(newId);
+        runNextLocal();
+        return send(res, 200, { id: newId });
+      }
       if (what === 'hide') {
         const { hidden } = await readBody(req);
         job.hidden = !!hidden; // never delete the row: it backs the spend math
