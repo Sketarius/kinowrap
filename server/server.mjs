@@ -58,7 +58,7 @@ const MODELS = {
     extraImage: 0.074,
   },
 };
-// Local H3 on your own GPU: free, slow, text-to-video only, one job at a time.
+// Local H3 on your own GPU: free, slow, one job at a time.
 if (existsSync(LOCAL_H3_SCRIPT) && existsSync(LOCAL_H3_PYTHON)) {
   MODELS[LOCAL] = {
     label: 'Local (free, slow)', local: true, minSeconds: 1, maxSeconds: LOCAL_H3_MAX_SECONDS,
@@ -118,11 +118,6 @@ function plan(body) {
     throw new Error(`Prompt is ${body.prompt.length} characters; the limit is ${LIMITS.prompt}.`);
   }
 
-  if (model.local) {
-    if (refs.length) throw new Error('Local H3 is text-to-video only. Remove the references (or pick a MiniMax model).');
-    if (!model.ratios.includes(body.ratio)) throw new Error(`Local H3 supports ${model.ratios.join(' or ')}.`);
-  }
-
   const frames = refs.filter((r) => r.role === 'first_frame' || r.role === 'last_frame');
   const media = refs.filter((r) => ['reference_image', 'reference_video', 'reference_audio'].includes(r.role));
   if (frames.length && media.length) {
@@ -167,6 +162,10 @@ function plan(body) {
   if (bytes > LIMITS.requestBytes) throw new Error(`Uploaded files total ${(bytes / MB).toFixed(1)} MB; the request limit is ${LIMITS.requestBytes / MB} MB. Use URLs for large files.`);
 
   let ratio = body.ratio;
+  // Local H3 renders 16:9 or 9:16. With images, "adaptive" picks whichever fits the first image.
+  if (model.local && !(model.ratios.includes(ratio) || (mode !== 't2v' && ratio === 'adaptive'))) {
+    throw new Error(`Local H3 supports ${model.ratios.join(' or ')}${mode === 't2v' ? '' : ' (or adaptive, from your image)'}.`);
+  }
   if (mode === 'i2v') ratio = 'adaptive';
   else if (mode === 't2v' && !RATIOS.includes(ratio)) throw new Error('Text-to-video needs a specific aspect ratio (not adaptive).');
   else if (mode === 'r2v' && ratio !== 'adaptive' && !RATIOS.includes(ratio)) throw new Error(`Unsupported aspect ratio: ${ratio}`);
@@ -186,11 +185,11 @@ function estimate(body) {
   const lines = [{ label: `${duration}s ${model.label} at ${resolution}`, cost: duration * rate }];
 
   const images = refs.filter((r) => r.type === 'image').length;
-  if (images > model.freeImages) {
+  if (model.local) { /* references are free locally */ } else if (images > model.freeImages) {
     const extra = images - model.freeImages;
     lines.push({ label: `${extra} image(s) beyond the ${model.freeImages} free`, cost: extra * model.extraImage });
   }
-  for (const v of refs.filter((r) => r.type === 'video')) {
+  for (const v of model.local ? [] : refs.filter((r) => r.type === 'video')) {
     lines.push({ label: `reference video (${Number(v.seconds)}s)`, cost: Number(v.seconds) * model.refVideoRates[resolution] });
   }
   const rounded = lines.map((l) => ({ ...l, cost: round(l.cost) }));
@@ -416,6 +415,7 @@ async function saveVideo(job, url) {
 const localQueue = []; // job ids waiting to run
 const localProgress = new Map(); // job id -> { step, total }
 const localCancelled = new Set();
+const localInputs = new Map(); // job id -> staged input files
 let localRunning = null; // { id, child }
 
 async function updateJob(id, fn) {
@@ -429,12 +429,17 @@ function runNextLocal() {
   const id = localQueue.shift();
   readLedger().then(async (l) => {
     const job = l.jobs.find((j) => j.id === id);
-    if (!job || job.status !== 'processing') return runNextLocal();
+    if (!job || job.status !== 'processing') { const x = localInputs.get(id); localInputs.delete(id); if (x) fs.rm(x.dir, { recursive: true, force: true }).catch(() => {}); return runNextLocal(); }
     job.rawStatus = 'running';
     await writeLedger(l);
     const out = path.join(OUT_DIR, `${id}.mp4`);
     const args = ['-u', LOCAL_H3_SCRIPT, '--seconds', String(job.duration), '--steps', String(job.steps), '--seed', String(job.seed), '--out', out];
     if (job.ratio === '9:16') args.push('--vertical');
+    if (job.ratio === 'adaptive') args.push('--auto-orient');
+    const inputs = localInputs.get(id);
+    if (inputs?.first) args.push('--first', inputs.first);
+    if (inputs?.last) args.push('--last', inputs.last);
+    for (const r of inputs?.refs ?? []) args.push('--ref', `${r.type}:${r.path}`);
     args.push('--', job.prompt);
     const child = spawn(LOCAL_H3_PYTHON, args, { cwd: LOCAL_H3_DIR, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     localRunning = { id, child };
@@ -456,6 +461,9 @@ function runNextLocal() {
       if (localRunning?.id !== id) return;
       localRunning = null;
       localProgress.delete(id);
+      const inputs = localInputs.get(id);
+      localInputs.delete(id);
+      if (inputs) fs.rm(inputs.dir, { recursive: true, force: true }).catch(() => {});
       const cancelled = localCancelled.delete(id);
       const ok = !err && code === 0 && existsSync(out);
       await updateJob(id, (j) => {
@@ -470,6 +478,30 @@ function runNextLocal() {
     child.on('error', (e) => finish(null, e));
     child.on('close', (code) => finish(code));
   }).catch(() => { localRunning = null; });
+}
+
+// Writes the job's input files (uploads and links) to disk for h3.py. Returns { dir, first, last, refs: [{ type, path }] }.
+async function stageLocalInputs(id, refs) {
+  const dir = path.join(DATA_DIR, 'local', id);
+  await fs.mkdir(dir, { recursive: true });
+  const staged = { dir, first: null, last: null, refs: [] };
+  const fallback = { image: 'png', video: 'mp4', audio: 'mp3' };
+  for (const [i, r] of refs.entries()) {
+    const m = typeof r.url === 'string' ? r.url.match(/^data:([^;,]+);base64,(.*)$/s) : null;
+    let bytes;
+    if (m) bytes = Buffer.from(m[2], 'base64');
+    else {
+      const dl = await fetch(r.url, { redirect: 'follow', signal: AbortSignal.timeout(120000) });
+      if (!dl.ok) throw new Error(`${r.url} returned HTTP ${dl.status}.`);
+      bytes = Buffer.from(await dl.arrayBuffer());
+    }
+    const file = path.join(dir, `${i}.${(m && EXT[m[1]]) || fallback[r.type]}`);
+    await fs.writeFile(file, bytes);
+    if (r.role === 'first_frame') staged.first = file;
+    else if (r.role === 'last_frame') staged.last = file;
+    else staged.refs.push({ type: r.type, path: file });
+  }
+  return staged;
 }
 
 function killLocal(child) {
@@ -534,11 +566,20 @@ const routes = {
     if (MODELS[body.model]?.local) {
       // Free and on this machine: no balance or daily-limit checks, nothing is sent to MiniMax, cost stays $0.
       const id = `local-${Date.now()}`;
+      let staged;
+      try {
+        const refs = await prepareRefs(body.refs);
+        staged = await stageLocalInputs(id, refs);
+        body.refs = refs;
+      } catch (e) {
+        return [400, { error: e.message }];
+      }
+      localInputs.set(id, staged);
       l.jobs.push({
-        id, type: 'generation', model: LOCAL, mode: 't2v', prompt: body.prompt, cost: 0,
+        id, type: 'generation', model: LOCAL, mode: est.mode, prompt: body.prompt, cost: 0,
         resolution: body.resolution, duration: body.duration, ratio: est.ratio, steps: LOCAL_H3_STEPS,
         seed: Math.floor(Math.random() * 1e6), status: 'processing', rawStatus: 'queued', file: null,
-        createdAt: new Date().toISOString(), refs: [],
+        createdAt: new Date().toISOString(), refs: await persistRefs(body.refs),
       });
       await writeLedger(l);
       localQueue.push(id);
@@ -867,7 +908,11 @@ const server = http.createServer(async (req, res) => {
       if (job.model === LOCAL) { // local jobs can be cancelled while queued or running
         if (job.status !== 'processing') return send(res, 409, { error: 'That job has already finished.' });
         const q = localQueue.indexOf(job.id);
-        if (q >= 0) localQueue.splice(q, 1);
+        if (q >= 0) {
+          localQueue.splice(q, 1);
+          const x = localInputs.get(job.id); localInputs.delete(job.id);
+          if (x) fs.rm(x.dir, { recursive: true, force: true }).catch(() => {});
+        }
         job.status = 'cancelled';
         await writeLedger(l);
         if (localRunning?.id === job.id) { localCancelled.add(job.id); killLocal(localRunning.child); }

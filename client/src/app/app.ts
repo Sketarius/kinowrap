@@ -152,7 +152,6 @@ export class App implements OnInit {
     if (!lim) return p;
     const refs = this.refs();
     const count = (role: Role) => refs.filter((r) => r.role === role).length;
-    if (this.isLocal() && refs.length) p.push('Local H3 is text-to-video only. Remove the references or pick a MiniMax model.');
     if (this.mode() === 'mixed') p.push("First/last frame images can't be combined with reference images, video or audio.");
     if (count('first_frame') > 1) p.push('Only one first frame is allowed.');
     if (count('last_frame') > 1) p.push('Only one last frame is allowed.');
@@ -314,7 +313,7 @@ export class App implements OnInit {
   // Local H3 has a shorter maximum length and only two aspect ratios.
   private fitToModel(info: ModelInfo) {
     if (this.duration() > (info.maxSeconds ?? 15)) this.duration.set(info.maxSeconds ?? 15);
-    if (info.ratios && !info.ratios.includes(this.ratio())) this.ratio.set(info.ratios[0]);
+    if (info.ratios && this.ratio() !== 'adaptive' && !info.ratios.includes(this.ratio())) this.ratio.set(info.ratios[0]);
   }
 
   ngOnInit() {
