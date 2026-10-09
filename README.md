@@ -183,6 +183,19 @@ Under the prompt, **Library** saves things you reuse:
 
 Click **Use** to load an item back in.
 
+## Local H3 (optional, free, slow)
+
+If a local copy of MiniMax H3 is installed (see [DiffSynth-Studio](https://github.com/modelscope/DiffSynth-Studio)'s NF4 low-VRAM example), Kinowrap can queue jobs to it. A **Local (free, slow)** model then appears in the Model list.
+
+- It needs a folder with `h3.py` and a `venv` inside it. Kinowrap looks in `../h3-local` (next to this folder), or in `LOCAL_H3_DIR` if you set it. The model is hidden when the folder isn't there.
+- It supports all three modes: **text-to-video**, **first/last frame**, and **references** (images, video, audio, in the order you list them). References need the Ref2VA weights as well as the FL2VA ones; `h3.py` picks the right model itself.
+- `h3.py` is called as `python h3.py --seconds N --steps N --seed N [--vertical|--auto-orient] [--first img] [--last img] [--ref image:path ...] --out file.mp4 -- "prompt"` and must print `STEP i/N` lines (the page shows them as progress).
+- 480p, 16:9 or 9:16 (or "adaptive", which follows your first image), 1 to `LOCAL_H3_MAX_SECONDS` seconds (default 5). Whole seconds snap to the model's frame counts (17n+5). The same reference limits as MiniMax apply, but local references are free.
+- Jobs run **one at a time**; the rest wait their turn and can be cancelled (a running job is stopped). Nothing is sent to MiniMax.
+- They show in History as **free**, cost $0, and never count toward your spend, daily limit or Insights.
+- Prompts: the local model reads plain text like "Image 1 shows Alice" (the cast lines work), but it was trained on a longer structured prompt format for video and audio references, so results with those may be weaker than MiniMax's.
+- Measured on an RTX 4060 Laptop (8 GB), per step: about 6 s for a 1-second text clip, about 20 s with first/last frames or a reference image, about 38 s with a reference video and audio; 5 seconds is about 52 s per step for text. Add a minute or so for encoding. A 5-second text clip at 20 steps takes about 18 minutes.
+
 ## Prices and limits
 
 Prices below are MiniMax's pay-as-you-go rates when this was written. **They can change.** If they do, edit the `MODELS` table at the top of `server/server.mjs`. See <https://platform.minimax.io/docs/guides/pricing-paygo> for current numbers.
@@ -223,6 +236,9 @@ All settings live in `server/.env` (copy from `server/.env.example`). Restart af
 | `LOW_BALANCE_USD` | `3` | Show a warning below this balance. |
 | `PORT` | `3000` | Server port. If you change it, change `client/proxy.conf.json` too. |
 | `MINIMAX_BASE_URL` | `https://api.minimax.io` | MiniMax API address. Kinowrap targets the international platform; other regions are untested. |
+| `LOCAL_H3_DIR` | `../h3-local` | Folder with `h3.py` and a `venv` for the optional [Local H3](#local-h3-optional-free-slow) model. |
+| `LOCAL_H3_STEPS` | `20` | Denoising steps for local jobs (more is slower). |
+| `LOCAL_H3_MAX_SECONDS` | `5` | Longest local clip. |
 
 ## Where your data lives
 
