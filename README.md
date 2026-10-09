@@ -36,7 +36,7 @@ A local web app for making AI video with [MiniMax](https://www.minimax.io)'s vid
 
 ## Requirements
 
-- **macOS or Linux.** The one-command launcher uses macOS/Linux features. On Windows, start the two parts by hand (see [Quick start](#quick-start)); that path is untested.
+- **macOS, Linux or Windows 11.** The launcher has Windows handling (tested on Windows 11). The Angular 22 page needs Node 22.22.3 or newer (or 24.15+), which is newer than the server's 20.6 minimum.
 - **[Node.js](https://nodejs.org) 20.6 or newer** (the server reads its settings file with `node --env-file`). Check with `node -v`.
 - **npm** (comes with Node).
 - **[ffmpeg](https://ffmpeg.org/download.html)** on your PATH. It's only needed for "Continue from last frame" and "Stitch". Check with `ffmpeg -version`. On macOS: `brew install ffmpeg`.
@@ -277,7 +277,7 @@ MiniMax endpoints used: `POST /v2/video_generation`, `GET /v2/query/video_genera
 - **Failed-job billing is undocumented.** The app errs on the side of counting them until you say otherwise.
 - **The 2K-upgrade price is the app's reading** of MiniMax's pricing page and may be off.
 - **Cast pairing isn't guaranteed.** It improves the odds that voices land on the right characters; it can't force it. One review found generated audio doesn't reproduce your uploaded clip exactly.
-- **Windows** isn't supported by the one-command launcher, and the app is untested there.
+- **Windows** support is new and lightly tested (launcher, page, history, references, stitch and last-frame with a fake key).
 - **Local only.** There is no login. Don't expose the server to the internet.
 - Prices and limits are copied from MiniMax's docs and can change.
 
