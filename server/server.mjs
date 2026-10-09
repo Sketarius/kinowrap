@@ -27,20 +27,23 @@ const MAX_DAILY = Number(process.env.MAX_DAILY_USD || 0); // 0 = no daily cap
 // Optional local provider: a folder containing h3.py and a venv (see README). Off when the folder isn't there.
 const LOCAL_H3_DIR = process.env.LOCAL_H3_DIR || path.join(__dirname, '..', '..', 'h3-local');
 const LOCAL_H3_SCRIPT = path.join(LOCAL_H3_DIR, 'h3.py');
-// Optional Real-ESRGAN (ncnn/Vulkan) build, used to upscale finished local 480p clips to 768p.
-const LOCAL_UPSCALER = process.env.LOCAL_UPSCALER || path.join(LOCAL_H3_DIR, 'tools', 'esrgan', process.platform === 'win32' ? 'realesrgan-ncnn-vulkan.exe' : 'realesrgan-ncnn-vulkan');
+// Optional ncnn/Vulkan upscaler programs, used to upscale finished local 480p clips to 768p. Each lives in its own folder under
+// LOCAL_UPSCALERS_DIR (esrgan/, realcugan/, waifu2x/). A choice only shows up when its program and model files are there.
+const LOCAL_UPSCALERS_DIR = process.env.LOCAL_UPSCALERS_DIR || path.join(LOCAL_H3_DIR, 'tools');
 const LOCAL_H3_PYTHON = path.join(LOCAL_H3_DIR, 'venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
-// Models in the Real-ESRGAN package. `perSecond` is roughly how long one second of video takes on an RTX 4060 laptop.
+const exe = (name) => (process.platform === 'win32' ? `${name}.exe` : name);
+// `perSecond` is roughly how long one second of video takes on an RTX 4060 laptop. `args` are the program's own options.
 const UPSCALER_CHOICES = [
-  { id: 'realesr-animevideov3', label: 'Anime / video (fast)', scale: 2, file: 'realesr-animevideov3-x2', perSecond: 3, note: 'Made for video; fastest. Best for animation and clean footage.' },
-  { id: 'realesrgan-x4plus-anime', label: 'Anime / illustration (medium)', scale: 4, file: 'realesrgan-x4plus-anime', perSecond: 16, note: 'Smooth lines and flat colour.' },
-  { id: 'realesrgan-x4plus', label: 'Live-action / photo (slow, most detail)', scale: 4, file: 'realesrgan-x4plus', perSecond: 45, note: 'General photo model; keeps the most texture.' },
+  { id: 'realesr-animevideov3', label: 'Anime / video (fast)', dir: 'esrgan', program: 'realesrgan-ncnn-vulkan', scale: 2, args: ['-n', 'realesr-animevideov3', '-s', '2', '-m', 'models'], need: 'models/realesr-animevideov3-x2.param', perSecond: 3, note: 'Real-ESRGAN, made for video. Fast; good for animation and clean footage.' },
+  { id: 'realcugan-conservative', label: 'Anime, faithful (Real-CUGAN)', dir: 'realcugan', program: 'realcugan-ncnn-vulkan', scale: 2, args: ['-n', '-1', '-s', '2', '-m', 'models-se'], need: 'models-se/up2x-conservative.param', perSecond: 3, note: 'Conservative: stays close to the original drawing, so it looks the least processed.' },
+  { id: 'realcugan-denoise', label: 'Anime, cleaned up (Real-CUGAN)', dir: 'realcugan', program: 'realcugan-ncnn-vulkan', scale: 2, args: ['-n', '2', '-s', '2', '-m', 'models-se'], need: 'models-se/up2x-denoise2x.param', perSecond: 3, note: 'Also removes noise and compression blocks; slightly more smoothing.' },
+  { id: 'waifu2x-cunet', label: 'Anime, gentle (waifu2x)', dir: 'waifu2x', program: 'waifu2x-ncnn-vulkan', scale: 2, args: ['-n', '1', '-s', '2', '-m', 'models-cunet'], need: 'models-cunet/noise1_scale2.0x_model.param', perSecond: 5, note: 'The classic anime upscaler: clean lines, little invented detail.' },
+  { id: 'realesrgan-x4plus-anime', label: 'Anime / illustration (Real-ESRGAN, medium)', dir: 'esrgan', program: 'realesrgan-ncnn-vulkan', scale: 4, args: ['-n', 'realesrgan-x4plus-anime', '-s', '4', '-m', 'models'], need: 'models/realesrgan-x4plus-anime.param', perSecond: 16, note: 'Smooth lines and flat colour.' },
+  { id: 'realesrgan-x4plus', label: 'Live-action / photo (Real-ESRGAN, slow)', dir: 'esrgan', program: 'realesrgan-ncnn-vulkan', scale: 4, args: ['-n', 'realesrgan-x4plus', '-s', '4', '-m', 'models'], need: 'models/realesrgan-x4plus.param', perSecond: 45, note: 'General photo model; keeps the most texture.' },
 ];
-const upscalersAvailable = () => {
-  const models = path.join(path.dirname(LOCAL_UPSCALER), 'models');
-  return existsSync(LOCAL_UPSCALER) ? UPSCALER_CHOICES.filter((u) => existsSync(path.join(models, `${u.file}.param`))) : [];
-};
-const LOCAL_H3_STEPS =Number(process.env.LOCAL_H3_STEPS || 20);
+const upscalerExe = (u) => path.join(LOCAL_UPSCALERS_DIR, u.dir, exe(u.program));
+const upscalersAvailable = () => UPSCALER_CHOICES.filter((u) => existsSync(upscalerExe(u)) && existsSync(path.join(LOCAL_UPSCALERS_DIR, u.dir, u.need)));
+const LOCAL_H3_STEPS = Number(process.env.LOCAL_H3_STEPS || 20);
 const LOCAL_H3_MAX_SECONDS = Number(process.env.LOCAL_H3_MAX_SECONDS || 10);
 const LOCAL = 'local-h3';
 
@@ -454,7 +457,8 @@ async function runUpscale(id, job, ledger) {
     if (cancelled()) throw new Error('cancelled');
     const started = Date.now();
     await new Promise((resolve, reject) => {
-      const child = spawn(LOCAL_UPSCALER, ['-i', path.join(dir, 'in'), '-o', path.join(dir, 'out'), '-n', job.upscaler, '-s', String(UPSCALER_CHOICES.find((u) => u.id === job.upscaler)?.scale ?? 2), '-f', 'png', '-m', path.join(path.dirname(LOCAL_UPSCALER), 'models')], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      const choice = UPSCALER_CHOICES.find((u) => u.id === job.upscaler);
+      const child = spawn(upscalerExe(choice), ['-i', path.join(dir, 'in'), '-o', path.join(dir, 'out'), ...choice.args, '-f', 'png'], { cwd: path.join(LOCAL_UPSCALERS_DIR, choice.dir), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
       localRunning.child = child;
       const onData = (d) => {
         const pcts = [...d.toString().matchAll(/(\d+(?:\.\d+)?)%/g)].map((m) => Number(m[1]));

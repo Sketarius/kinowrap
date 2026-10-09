@@ -196,7 +196,7 @@ If a local copy of MiniMax H3 is installed (see [DiffSynth-Studio](https://githu
 
 ### Setting it up
 
-Do this once, in a terminal. The folder must be named `h3-local` and sit **next to** the `kinowrap` folder (or set `LOCAL_H3_DIR`). The commands below are for Windows PowerShell; on Linux use `venv/bin/python` instead of `venvScriptspython.exe`.
+Do this once, in a terminal. The folder must be named `h3-local` and sit **next to** the `kinowrap` folder (or set `LOCAL_H3_DIR`). The commands below are for Windows PowerShell; on Linux use `venv/bin/python` instead of `venv\Scripts\python.exe`.
 
 ```powershell
 # from the folder that contains kinowrap
@@ -204,26 +204,26 @@ mkdir h3-local; cd h3-local
 python -m venv venv
 
 # PyTorch with CUDA (pick the CUDA version your driver supports; cu126 is what was tested)
-venvScriptspython.exe -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+venv\Scripts\python.exe -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 
 # DiffSynth-Studio, which runs the model
 git clone https://github.com/modelscope/DiffSynth-Studio
-cd DiffSynth-Studio; ..envScriptspython.exe -m pip install -e .; cd ..
-venvScriptspython.exe -m pip install av bitsandbytes modelscope
+cd DiffSynth-Studio; ..\venv\Scripts\python.exe -m pip install -e .; cd ..
+venv\Scripts\python.exe -m pip install av bitsandbytes modelscope
 
 # Kinowrap's launcher for it
-copy ..kinowraplocalh3.py h3.py
+copy ..\kinowrap\local\h3.py h3.py
 ```
 
-Then try it. The first run downloads about **28 GB** of weights from ModelScope into `h3-localmodels` (this takes a while and happens only once):
+Then try it. The first run downloads about **28 GB** of weights from ModelScope into `h3-local\models` (this takes a while and happens only once):
 
 ```powershell
-venvScriptspython.exe -u h3.py "a paper boat on a puddle" --seconds 1 --steps 10
+venv\Scripts\python.exe -u h3.py "a paper boat on a puddle" --seconds 1 --steps 10
 ```
 
-It prints `STEP i/N` lines and `DONE <path>`; the video lands in `h3-localoutputs`. The first step is slow. If this works, restart Kinowrap and **Local (free, slow)** appears in the Model list. The first job that uses references downloads the extra 10.5 GB.
+It prints `STEP i/N` lines and `DONE <path>`; the video lands in `h3-local\outputs`. The first step is slow. If this works, restart Kinowrap and **Local (free, slow)** appears in the Model list. The first job that uses references downloads the extra 10.5 GB.
 
-`h3.py` is the whole interface Kinowrap uses, and you can run it yourself the same way. It sets `MODELSCOPE_ENDPOINT=https://modelscope.ai` (faster than modelscope.cn for many connections) and changes into its own folder, so the weights always load from `h3-localmodels`.
+`h3.py` is the whole interface Kinowrap uses, and you can run it yourself the same way. It sets `MODELSCOPE_ENDPOINT=https://modelscope.ai` (faster than modelscope.cn for many connections) and changes into its own folder, so the weights always load from `h3-local\models`.
 
 **If it fails:**
 - `os error 1455` or "invalid python storage": Windows ran out of memory it can promise. `h3.py` already reads weights without memory-mapping them to avoid this; close other heavy programs, and make sure the Windows paging file isn't tiny.
@@ -233,23 +233,28 @@ It prints `STEP i/N` lines and `DONE <path>`; the video lands in `h3-localoutput
 
 ### Optional: upscale 480p clips to 768p
 
-Generating at 768p is about 3.7 times slower than 480p and limited to 5 seconds. A faster route to a sharper long clip is to make it at 480p and upscale it afterwards. Kinowrap can do that with [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) (BSD-3-Clause), running on your GPU through Vulkan:
+Generating at 768p is about 3.7 times slower than 480p and limited to 5 seconds. A faster route to a sharper long clip is to make it at 480p and upscale it afterwards. Kinowrap can do that with free AI upscalers that run on your GPU through Vulkan. Each program goes in its own folder under `h3-local\tools`, and each one you add shows up in a dropdown next to the **Upscale to 768p** button on finished **local 480p** clips (restart Kinowrap after adding one). You can install any or all of them:
 
-1. Download `realesrgan-ncnn-vulkan-20220424-windows.zip` (about 45 MB) from the [v0.2.5.0 release](https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0) (use the `ubuntu` zip on Linux).
-2. Unzip it so that `realesrgan-ncnn-vulkan.exe` and its `models` folder are in `h3-local	oolsesrgan` (or set `LOCAL_UPSCALER` to the program's path; the `models` folder must sit next to it).
-3. Restart Kinowrap. Finished **local 480p** clips now have an **Upscale to 768p** button with a model dropdown beside it.
-
-Pick a model in the dropdown (your choice is remembered). The three models in the package are:
-
-| Model | Best for | Speed (RTX 4060 laptop, per second of video) |
+| Folder | Download (Windows; use the `ubuntu` zip on Linux) | Models it adds |
 |---|---|---|
-| Anime / video (`realesr-animevideov3`, 2x) | animation and clean footage; made for video | about 3 s |
-| Anime / illustration (`realesrgan-x4plus-anime`, 4x) | smooth lines and flat colour | about 16 s |
-| Live-action / photo (`realesrgan-x4plus`, 4x) | real-looking footage; keeps the most texture | about 45 s |
+| `tools\esrgan` | [Real-ESRGAN `realesrgan-ncnn-vulkan-20220424-windows.zip`](https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0), about 45 MB, BSD-3-Clause | Anime / video, Anime / illustration, Live-action / photo |
+| `tools\realcugan` | [Real-CUGAN `realcugan-ncnn-vulkan-20220728-windows.zip`](https://github.com/nihui/realcugan-ncnn-vulkan/releases/tag/20220728), about 46 MB, MIT | Anime, faithful (conservative) and Anime, cleaned up (denoise) |
+| `tools\waifu2x` | [waifu2x `waifu2x-ncnn-vulkan-20250915-windows.zip`](https://github.com/nihui/waifu2x-ncnn-vulkan/releases/tag/20250915), about 35 MB, MIT | Anime, gentle |
 
-The result is scaled to 1344×768 (or 768×1344), keeps the original audio, and is saved as a **new clip**, so you can upscale the same clip with a different model to compare. The button is only shown for clips made by the local model, never for MiniMax jobs. Other Real-ESRGAN models exist; to add one, put its ncnn `.param`/`.bin` files in the `models` folder and add it to `UPSCALER_CHOICES` in `server/server.mjs`.
+Unzip each so the program and its model folders sit directly in that folder (for example `h3-local\tools\realcugan\realcugan-ncnn-vulkan.exe` next to `models-se`), not in an extra subfolder. To keep them somewhere else, set `LOCAL_UPSCALERS_DIR`.
 
-This sharpens and cleans the picture, but it can't invent detail that the 480p clip never had, so expect it to look better than a plain resize and not like a native 768p generation. It also works frame by frame, so fine textures can shimmer slightly between frames.
+| Choice | Best for | Speed (RTX 4060 laptop, per second of video) |
+|---|---|---|
+| Anime / video (Real-ESRGAN, 2x) | animation and clean footage; made for video | about 3 s |
+| Anime, faithful (Real-CUGAN, 2x) | animation where you want the least processed look | about 3 s |
+| Anime, cleaned up (Real-CUGAN, 2x) | animation with noise or blocky compression | about 3 s |
+| Anime, gentle (waifu2x, 2x) | clean lines, very little invented detail | about 5 s |
+| Anime / illustration (Real-ESRGAN, 4x) | smooth lines and flat colour | about 16 s |
+| Live-action / photo (Real-ESRGAN, 4x) | real-looking footage; keeps the most texture | about 45 s |
+
+Pick a choice in the dropdown (it is remembered). The result is scaled to 1344×768 (or 768×1344), keeps the original audio, and is saved as a **new clip**, so you can upscale the same clip with a different model to compare. The button is only shown for clips made by the local model, never for MiniMax jobs.
+
+This sharpens and cleans the picture, but it can't invent detail that the 480p clip never had, so expect it to look better than a plain resize and not like a native 768p generation. It also works frame by frame, so fine textures can shimmer slightly between frames. Much of an "AI look" in generated animation comes from the generator itself and can't be removed by upscaling. To add another ncnn upscaler, add an entry to `UPSCALER_CHOICES` in `server/server.mjs`.
 
 ### How it behaves
 
@@ -306,7 +311,7 @@ All settings live in `server/.env` (copy from `server/.env.example`). Restart af
 | `LOCAL_H3_DIR` | `../h3-local` | Folder with `h3.py` and a `venv` for the optional [Local H3](#local-h3-optional-free-slow) model. |
 | `LOCAL_H3_STEPS` | `20` | Denoising steps for local jobs (more is slower). |
 | `LOCAL_H3_MAX_SECONDS` | `10` | Longest local clip. |
-| `LOCAL_UPSCALER` | `<LOCAL_H3_DIR>/tools/esrgan/realesrgan-ncnn-vulkan` | Real-ESRGAN program used by the optional [upscale button](#optional-upscale-480p-clips-to-768p). |
+| `LOCAL_UPSCALERS_DIR` | `<LOCAL_H3_DIR>/tools` | Folder holding the optional upscaler programs (`esrgan`, `realcugan`, `waifu2x`) behind the [upscale button](#optional-upscale-480p-clips-to-768p). |
 
 ## Where your data lives
 
