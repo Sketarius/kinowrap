@@ -11,6 +11,7 @@ A local web app for making AI video with [MiniMax](https://www.minimax.io)'s vid
 - [Quick start](#quick-start)
 - [Getting a MiniMax API key](#getting-a-minimax-api-key)
 - [Using Kinowrap](#using-kinowrap)
+- [Local H3 (optional)](#local-h3-optional-free-slow)
 - [Prices and limits](#prices-and-limits)
 - [Spending safety](#spending-safety)
 - [Settings](#settings)
@@ -186,6 +187,51 @@ Click **Use** to load an item back in.
 ## Local H3 (optional, free, slow)
 
 If a local copy of MiniMax H3 is installed (see [DiffSynth-Studio](https://github.com/modelscope/DiffSynth-Studio)'s NF4 low-VRAM example), Kinowrap can queue jobs to it. A **Local (free, slow)** model then appears in the Model list.
+
+### What you need
+
+- An **NVIDIA GPU with 8 GB of VRAM** or more (tested on an RTX 4060 Laptop), about **16 GB of RAM**, and **40 GB of free disk** (about 28 GB of weights for text and frames, plus 10.5 GB more the first time you use references).
+- Python 3.11 or 3.12, git, and [ffmpeg](https://ffmpeg.org/download.html) on your PATH.
+- Windows or Linux with a CUDA-capable PyTorch. macOS and AMD aren't covered: `h3.py` asks for CUDA.
+
+### Setting it up
+
+Do this once, in a terminal. The folder must be named `h3-local` and sit **next to** the `kinowrap` folder (or set `LOCAL_H3_DIR`). The commands below are for Windows PowerShell; on Linux use `venv/bin/python` instead of `venvScriptspython.exe`.
+
+```powershell
+# from the folder that contains kinowrap
+mkdir h3-local; cd h3-local
+python -m venv venv
+
+# PyTorch with CUDA (pick the CUDA version your driver supports; cu126 is what was tested)
+venvScriptspython.exe -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+
+# DiffSynth-Studio, which runs the model
+git clone https://github.com/modelscope/DiffSynth-Studio
+cd DiffSynth-Studio; ..envScriptspython.exe -m pip install -e .; cd ..
+venvScriptspython.exe -m pip install av bitsandbytes modelscope
+
+# Kinowrap's launcher for it
+copy ..kinowraplocalh3.py h3.py
+```
+
+Then try it. The first run downloads about **28 GB** of weights from ModelScope into `h3-localmodels` (this takes a while and happens only once):
+
+```powershell
+venvScriptspython.exe -u h3.py "a paper boat on a puddle" --seconds 1 --steps 10
+```
+
+It prints `STEP i/N` lines and `DONE <path>`; the video lands in `h3-localoutputs`. The first step is slow. If this works, restart Kinowrap and **Local (free, slow)** appears in the Model list. The first job that uses references downloads the extra 10.5 GB.
+
+`h3.py` is the whole interface Kinowrap uses, and you can run it yourself the same way. It sets `MODELSCOPE_ENDPOINT=https://modelscope.ai` (faster than modelscope.cn for many connections) and changes into its own folder, so the weights always load from `h3-localmodels`.
+
+**If it fails:**
+- `os error 1455` or "invalid python storage": Windows ran out of memory it can promise. `h3.py` already reads weights without memory-mapping them to avoid this; close other heavy programs, and make sure the Windows paging file isn't tiny.
+- A CUDA out-of-memory error: close apps that use the GPU, or lower the clip length.
+- Nothing prints for a while: that's normal. Check `nvidia-smi` before assuming it's stuck.
+- `torch._dynamo` "recompile_limit" warnings are harmless.
+
+### How it behaves
 
 - It needs a folder with `h3.py` and a `venv` inside it. Kinowrap looks in `../h3-local` (next to this folder), or in `LOCAL_H3_DIR` if you set it. The model is hidden when the folder isn't there.
 - It supports all three modes: **text-to-video**, **first/last frame**, and **references** (images, video, audio, in the order you list them). References need the Ref2VA weights as well as the FL2VA ones; `h3.py` picks the right model itself.
