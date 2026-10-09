@@ -18,7 +18,8 @@ if (!existsSync(path.join(root, 'server', '.env'))) {
 
 const inUse = (port) =>
   new Promise((resolve) => {
-    const s = net.connect(port, '127.0.0.1');
+    // 'localhost' (not 127.0.0.1): on Windows ng serve may listen on IPv6 (::1) only.
+    const s = net.connect(port, 'localhost');
     s.on('connect', () => { s.destroy(); resolve(true); });
     s.on('error', () => resolve(false));
   });
@@ -35,7 +36,8 @@ let stopping = false;
 
 function start(name, color, cmd, args, cwd) {
   // detached = its own process group, so Ctrl+C can stop the whole tree (ng serve spawns children).
-  const child = spawn(cmd, args, { cwd, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  // On Windows, npm is a .cmd file (needs a shell) and the tree is stopped with taskkill instead.
+  const child = spawn(cmd, args, { cwd, detached: !isWin, shell: isWin, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   const tag = `\x1b[${color}m[${name}]\x1b[0m `;
   const relay = (out) => (data) => out.write(data.toString().split('\n').filter(Boolean).map((l) => tag + l).join('\n') + '\n');
   child.stdout.on('data', relay(process.stdout));
