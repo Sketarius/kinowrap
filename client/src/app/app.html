@@ -105,7 +105,7 @@
       <label>Resolution
         <select (change)="set('resolution', $any($event.target).value)">
           @for (r of resolutions(); track r) {
-            <option [value]="r" [selected]="r === resolution()">{{ r }} (${{ modelInfo()!.rates[r].toFixed(2) }}/s)</option>
+            <option [value]="r" [selected]="r === resolution()">{{ r }} ({{ modelInfo()!.local ? 'free' : '$' + modelInfo()!.rates[r].toFixed(2) + '/s' }})</option>
           }
         </select>
       </label>
@@ -125,8 +125,8 @@
       </label>
     </div>
 
-    <label>Length: {{ duration() }}s <span class="hint">({{ modelInfo()?.label }} allows {{ minSeconds() }}–15s)</span>
-      <input type="range" [min]="minSeconds()" max="15" [value]="duration()" (input)="set('duration', $any($event.target).value)" />
+    <label>Length: {{ duration() }}s <span class="hint">({{ modelInfo()?.label }} allows {{ minSeconds() }}–{{ maxSeconds() }}s)</span>
+      <input type="range" [min]="minSeconds()" [max]="maxSeconds()" [value]="duration()" (input)="set('duration', $any($event.target).value)" />
     </label>
 
     <p class="modeline">Mode: <strong>{{ modeLabel() }}</strong>
@@ -283,7 +283,7 @@
           @if (j.file) { <input type="checkbox" class="pick" [checked]="isSelected(j)" (change)="toggleSelect(j)" title="Select for stitching" /> }
           <strong>{{ j.status }}</strong>
           @if (j.type === 'upgrade') { · <span class="tag">2K upgrade</span> }
-          · {{ modelLabel(j) }} {{ j.duration }}s {{ j.resolution }}@if (j.ratio) { · {{ j.ratio }} } · ${{ j.cost.toFixed(2) }}
+          · {{ modelLabel(j) }} {{ j.duration }}s {{ j.resolution }}@if (j.ratio) { · {{ j.ratio }} } · {{ j.model === 'local-h3' ? 'free' : '$' + j.cost.toFixed(2) }}
           @if (j.type !== 'stitch') { · {{ j.refs?.length ? j.refs!.length + ' reference(s) sent' : 'no references' }} }
           @if (j.hidden) { · <em>hidden</em> }
           @if (j.refunded) { · <em>not charged</em> }
@@ -315,14 +315,18 @@
         } @else if (j.fileDeleted) {
           <p class="hint">Local video file deleted.</p>
         } @else if (j.status === 'processing') {
-          <p class="hint">Generating… checks every 10s.</p>
+          @if (j.model === 'local-h3') {
+            <p class="hint">{{ j.progress ? 'Step ' + j.progress.step + ' of ' + j.progress.total : j.rawStatus === 'running' ? 'Starting (the first step is slow)…' : 'Waiting for its turn…' }} Checks every 10s.</p>
+          } @else {
+            <p class="hint">Generating… checks every 10s.</p>
+          }
         }
 
         <div class="actions">
           @if (j.file) { <a class="btn" [href]="'/videos/' + j.file" [attr.download]="j.id + '.mp4'">Download</a> }
           <button type="button" (click)="reuse(j)">Reuse settings</button>
           @if (j.file && j.type !== 'stitch') { <button type="button" (click)="continueFrom(j)" title="Start a new clip from this clip's last frame">Continue from last frame</button> }
-          @if (j.status === 'processing' && j.rawStatus === 'queued') { <button type="button" (click)="cancelJob(j)">Cancel</button> }
+          @if (j.status === 'processing' && (j.rawStatus === 'queued' || j.model === 'local-h3')) { <button type="button" (click)="cancelJob(j)">Cancel</button> }
           @if (j.upgrade; as up) {
             <button type="button" [title]="upgradeTitle(j)" (click)="upgrade(j)">Upgrade to 2K · ${{ up.total.toFixed(2) }}</button>
           }

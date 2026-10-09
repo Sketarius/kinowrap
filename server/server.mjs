@@ -1,10 +1,10 @@
 // Kinowrap's local server: a proxy for the MiniMax video API. Holds the API key, enforces the documented request rules
 // and a spend cap, and keeps a ledger so the browser never sees the key.
 import http from 'node:http';
-import { promises as fs } from 'node:fs';
+import { promises as fs, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash, randomUUID } from 'node:crypto';
 
@@ -24,6 +24,13 @@ const MAX_SPEND = Number(process.env.MAX_SPEND_USD || 25);
 const PORT = Number(process.env.PORT || 3000);
 const LOW_BALANCE = Number(process.env.LOW_BALANCE_USD || 3);
 const MAX_DAILY = Number(process.env.MAX_DAILY_USD || 0); // 0 = no daily cap
+// Optional local provider: a folder containing h3.py and a venv (see README). Off when the folder isn't there.
+const LOCAL_H3_DIR = process.env.LOCAL_H3_DIR || path.join(__dirname, '..', '..', 'h3-local');
+const LOCAL_H3_SCRIPT = path.join(LOCAL_H3_DIR, 'h3.py');
+const LOCAL_H3_PYTHON = path.join(LOCAL_H3_DIR, 'venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+const LOCAL_H3_STEPS = Number(process.env.LOCAL_H3_STEPS || 20);
+const LOCAL_H3_MAX_SECONDS = Number(process.env.LOCAL_H3_MAX_SECONDS || 5);
+const LOCAL = 'local-h3';
 
 if (!API_KEY) {
   console.error('Missing MINIMAX_API_KEY. Copy .env.example to .env and set it.');
@@ -51,6 +58,13 @@ const MODELS = {
     extraImage: 0.074,
   },
 };
+// Local H3 on your own GPU: free, slow, text-to-video only, one job at a time.
+if (existsSync(LOCAL_H3_SCRIPT) && existsSync(LOCAL_H3_PYTHON)) {
+  MODELS[LOCAL] = {
+    label: 'Local (free, slow)', local: true, minSeconds: 1, maxSeconds: LOCAL_H3_MAX_SECONDS,
+    rates: { '480P': 0 }, refVideoRates: {}, freeImages: 0, extraImage: 0, ratios: ['16:9', '9:16'],
+  };
+}
 // 768P -> 2K regeneration. As read from the pricing page: output seconds plus the source video as input.
 const UPGRADE = { outputRate: 0.05, inputVideoRate: 0.05, freeImages: 5, extraImage: 0.025 };
 const RATIOS = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'];
@@ -102,6 +116,11 @@ function plan(body) {
   const refs = body.refs || [];
   if (typeof body.prompt === 'string' && body.prompt.length > LIMITS.prompt) {
     throw new Error(`Prompt is ${body.prompt.length} characters; the limit is ${LIMITS.prompt}.`);
+  }
+
+  if (model.local) {
+    if (refs.length) throw new Error('Local H3 is text-to-video only. Remove the references (or pick a MiniMax model).');
+    if (!model.ratios.includes(body.ratio)) throw new Error(`Local H3 supports ${model.ratios.join(' or ')}.`);
   }
 
   const frames = refs.filter((r) => r.role === 'first_frame' || r.role === 'last_frame');
@@ -159,9 +178,10 @@ function estimate(body) {
   const { model, mode, ratio, refs } = plan(body);
   const { duration, resolution } = body;
   const rate = model.rates[resolution];
-  if (!rate) throw new Error(`${model.label} supports ${Object.keys(model.rates).join(' or ')}, not ${resolution}.`);
-  if (!Number.isInteger(duration) || duration < model.minSeconds || duration > 15) {
-    throw new Error(`${model.label} clips must be a whole number of seconds from ${model.minSeconds} to 15.`);
+  if (rate === undefined) throw new Error(`${model.label} supports ${Object.keys(model.rates).join(' or ')}, not ${resolution}.`);
+  const maxSeconds = model.maxSeconds ?? 15;
+  if (!Number.isInteger(duration) || duration < model.minSeconds || duration > maxSeconds) {
+    throw new Error(`${model.label} clips must be a whole number of seconds from ${model.minSeconds} to ${maxSeconds}.`);
   }
   const lines = [{ label: `${duration}s ${model.label} at ${resolution}`, cost: duration * rate }];
 
@@ -391,6 +411,85 @@ async function saveVideo(job, url) {
   return true;
 }
 
+// ---- local H3 (one job at a time) --------------------------------------------------------------
+
+const localQueue = []; // job ids waiting to run
+const localProgress = new Map(); // job id -> { step, total }
+const localCancelled = new Set();
+let localRunning = null; // { id, child }
+
+async function updateJob(id, fn) {
+  const l = await readLedger();
+  const job = l.jobs.find((j) => j.id === id);
+  if (job) { fn(job); await writeLedger(l); }
+}
+
+function runNextLocal() {
+  if (localRunning || !localQueue.length) return;
+  const id = localQueue.shift();
+  readLedger().then(async (l) => {
+    const job = l.jobs.find((j) => j.id === id);
+    if (!job || job.status !== 'processing') return runNextLocal();
+    job.rawStatus = 'running';
+    await writeLedger(l);
+    const out = path.join(OUT_DIR, `${id}.mp4`);
+    const args = ['-u', LOCAL_H3_SCRIPT, '--seconds', String(job.duration), '--steps', String(job.steps), '--seed', String(job.seed), '--out', out];
+    if (job.ratio === '9:16') args.push('--vertical');
+    args.push('--', job.prompt);
+    const child = spawn(LOCAL_H3_PYTHON, args, { cwd: LOCAL_H3_DIR, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+    localRunning = { id, child };
+    const tail = [];
+    const onLine = (line) => {
+      const m = line.match(/^STEP (\d+)\/(\d+)/);
+      if (m) localProgress.set(id, { step: Number(m[1]), total: Number(m[2]) });
+      else if (line.trim()) { tail.push(line.trim()); if (tail.length > 30) tail.shift(); }
+    };
+    for (const stream of [child.stdout, child.stderr]) {
+      let buf = '';
+      stream.on('data', (d) => {
+        const parts = (buf + d.toString()).split(/[\r\n]+/);
+        buf = parts.pop();
+        parts.forEach(onLine);
+      });
+    }
+    const finish = async (code, err) => {
+      if (localRunning?.id !== id) return;
+      localRunning = null;
+      localProgress.delete(id);
+      const cancelled = localCancelled.delete(id);
+      const ok = !err && code === 0 && existsSync(out);
+      await updateJob(id, (j) => {
+        if (cancelled) { j.status = 'cancelled'; return; }
+        j.rawStatus = ok ? 'succeeded' : 'failed';
+        j.status = ok ? 'succeeded' : 'failed';
+        if (ok) j.file = `${id}.mp4`;
+        else j.failReason = err?.message || [...tail].reverse().find((t) => /error|exception/i.test(t)) || tail[tail.length - 1] || `h3 exited with code ${code}`;
+      }).catch(() => {});
+      runNextLocal();
+    };
+    child.on('error', (e) => finish(null, e));
+    child.on('close', (code) => finish(code));
+  }).catch(() => { localRunning = null; });
+}
+
+function killLocal(child) {
+  if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+  else child.kill('SIGTERM');
+}
+
+// Jobs that were running when the server last stopped can't be resumed.
+{
+  const l = await readLedger();
+  let changed = false;
+  for (const j of l.jobs) {
+    if (j.model === LOCAL && j.status === 'processing') {
+      j.status = 'failed'; j.rawStatus = 'failed'; j.failReason = 'The server stopped while this job was queued or running.'; changed = true;
+    }
+  }
+  if (changed) await writeLedger(l);
+}
+process.on('exit', () => { if (localRunning) killLocal(localRunning.child); });
+
 const routes = {
   'GET /api/status': async () => {
     const l = await readLedger();
@@ -432,6 +531,20 @@ const routes = {
       return [409, { error: `Price changed to $${est.total.toFixed(2)}. Review and confirm again.`, estimate: est }];
     }
     const l = await readLedger();
+    if (MODELS[body.model]?.local) {
+      // Free and on this machine: no balance or daily-limit checks, nothing is sent to MiniMax, cost stays $0.
+      const id = `local-${Date.now()}`;
+      l.jobs.push({
+        id, type: 'generation', model: LOCAL, mode: 't2v', prompt: body.prompt, cost: 0,
+        resolution: body.resolution, duration: body.duration, ratio: est.ratio, steps: LOCAL_H3_STEPS,
+        seed: Math.floor(Math.random() * 1e6), status: 'processing', rawStatus: 'queued', file: null,
+        createdAt: new Date().toISOString(), refs: [],
+      });
+      await writeLedger(l);
+      localQueue.push(id);
+      runNextLocal();
+      return [200, { taskId: id, estimate: est }];
+    }
     if (est.total > remainingOf(l)) {
       return [402, { error: `Would exceed your remaining balance ($${remainingOf(l).toFixed(2)}).` }];
     }
@@ -583,7 +696,7 @@ const routes = {
 
   'GET /api/stats': async () => {
     const l = await readLedger();
-    const billed = l.jobs.filter((j) => isBilled(j) && j.type !== 'stitch'); // stitches are free local joins
+    const billed = l.jobs.filter((j) => isBilled(j) && j.type !== 'stitch' && j.model !== LOCAL); // stitches and local jobs are free
     const byDay = new Map();
     const byModel = new Map();
     for (const j of billed) {
@@ -632,7 +745,7 @@ const routes = {
 
   'GET /api/history': async () => {
     const l = await readLedger();
-    const jobs = [...l.jobs].reverse().map((j) => ({ ...j, upgrade: upgradeEstimate(j) }));
+    const jobs = [...l.jobs].reverse().map((j) => ({ ...j, upgrade: upgradeEstimate(j), progress: localProgress.get(j.id) }));
     return [200, { jobs }];
   },
 };
@@ -643,6 +756,10 @@ function failReason(t) {
 }
 
 async function getTask(taskId) {
+  if (taskId.startsWith('local-')) { // local jobs are tracked by the runner, not by MiniMax
+    const job = (await readLedger()).jobs.find((j) => j.id === taskId);
+    return [200, { status: job?.status ?? 'failed', videoUrl: job?.file ? `/videos/${job.file}` : null, progress: localProgress.get(taskId) }];
+  }
   const r = await mm(`/v2/query/video_generation/${encodeURIComponent(taskId)}`);
   if (!r.ok) return [502, { error: `Status check failed: ${mmError(r)}`, detail: r.json }];
   // MiniMax wraps the task: { task: { status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled', ... } }
@@ -746,6 +863,15 @@ const server = http.createServer(async (req, res) => {
         } catch (e) {
           return send(res, 500, { error: `Couldn't extract a frame: ${e.stderr?.toString().trim() || e.message}` });
         }
+      }
+      if (job.model === LOCAL) { // local jobs can be cancelled while queued or running
+        if (job.status !== 'processing') return send(res, 409, { error: 'That job has already finished.' });
+        const q = localQueue.indexOf(job.id);
+        if (q >= 0) localQueue.splice(q, 1);
+        job.status = 'cancelled';
+        await writeLedger(l);
+        if (localRunning?.id === job.id) { localCancelled.add(job.id); killLocal(localRunning.child); }
+        return send(res, 200, { remaining: remainingOf(l) });
       }
       // cancel: MiniMax only allows this for queued tasks, and says there is no charge.
       const r = await mm(`/v2/video_generation/${encodeURIComponent(job.id)}`, { method: 'DELETE' });

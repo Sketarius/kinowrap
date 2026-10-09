@@ -15,7 +15,7 @@ interface Ref {
   seconds?: number;
   character?: string; // who this reference belongs to (used to write the cast lines)
 }
-interface ModelInfo { label: string; minSeconds: number; rates: Record<string, number> }
+interface ModelInfo { label: string; minSeconds: number; rates: Record<string, number>; maxSeconds?: number; ratios?: string[]; local?: boolean }
 interface Limits {
   prompt: number; referenceImages: number; videos: number; audios: number; totalFiles: number;
   clipMin: number; clipMax: number; videoTotalSeconds: number; audioTotalSeconds: number;
@@ -35,7 +35,7 @@ interface Job {
   refs?: StoredRef[]; refunded?: boolean;
   usage?: { output_seconds?: number; input_seconds?: number; total_seconds?: number; input_image_count?: number };
   failReason?: string | null; raw?: string; upgrade?: { lines: Line[]; total: number } | null; upgradedTo?: string;
-  hidden?: boolean; fileDeleted?: boolean; rawStatus?: string; meteredCost?: number; sources?: string[]; castBlock?: string;
+  hidden?: boolean; fileDeleted?: boolean; rawStatus?: string; progress?: { step: number; total: number }; meteredCost?: number; sources?: string[]; castBlock?: string;
 }
 // A reference as the server remembers it: a web link, or the name of an uploaded file it saved.
 interface StoredRef { type: RefType; role: Role; url?: string; file?: string; name?: string; seconds?: number; character?: string }
@@ -123,6 +123,8 @@ export class App implements OnInit {
   modelInfo = computed(() => this.models()[this.model()]);
   resolutions = computed(() => Object.keys(this.modelInfo()?.rates ?? {}));
   minSeconds = computed(() => this.modelInfo()?.minSeconds ?? 4);
+  maxSeconds = computed(() => this.modelInfo()?.maxSeconds ?? 15);
+  isLocal = computed(() => !!this.modelInfo()?.local);
   limits = computed(() => this.status()?.limits);
 
   mode = computed<Mode>(() => {
@@ -135,7 +137,7 @@ export class App implements OnInit {
 
   // MiniMax: text-to-video needs a concrete ratio; image-to-video is always adaptive; reference-to-video allows both.
   ratioOptions = computed(() => {
-    const ratios = this.status()?.ratios ?? [];
+    const ratios = this.modelInfo()?.ratios ?? this.status()?.ratios ?? [];
     return this.mode() === 'i2v' ? ['adaptive'] : this.mode() === 'r2v' ? ['adaptive', ...ratios] : ratios;
   });
   effectiveRatio = computed(() => {
@@ -150,6 +152,7 @@ export class App implements OnInit {
     if (!lim) return p;
     const refs = this.refs();
     const count = (role: Role) => refs.filter((r) => r.role === role).length;
+    if (this.isLocal() && refs.length) p.push('Local H3 is text-to-video only. Remove the references or pick a MiniMax model.');
     if (this.mode() === 'mixed') p.push("First/last frame images can't be combined with reference images, video or audio.");
     if (count('first_frame') > 1) p.push('Only one first frame is allowed.');
     if (count('last_frame') > 1) p.push('Only one last frame is allowed.');
@@ -305,6 +308,13 @@ export class App implements OnInit {
     if (!info) { this.model.set('MiniMax-H3'); return; }
     if (!(this.resolution() in info.rates)) this.resolution.set(Object.keys(info.rates)[0]);
     if (this.duration() < info.minSeconds) this.duration.set(info.minSeconds);
+    this.fitToModel(info);
+  }
+
+  // Local H3 has a shorter maximum length and only two aspect ratios.
+  private fitToModel(info: ModelInfo) {
+    if (this.duration() > (info.maxSeconds ?? 15)) this.duration.set(info.maxSeconds ?? 15);
+    if (info.ratios && !info.ratios.includes(this.ratio())) this.ratio.set(info.ratios[0]);
   }
 
   ngOnInit() {
@@ -351,6 +361,7 @@ export class App implements OnInit {
     if (info) {
       if (!(this.resolution() in info.rates)) this.resolution.set(Object.keys(info.rates)[0]);
       if (this.duration() < info.minSeconds) this.duration.set(info.minSeconds);
+      this.fitToModel(info);
     }
     this.refreshEstimate();
   }
@@ -548,7 +559,10 @@ export class App implements OnInit {
     if (!est) return;
     const n = this.refs().length;
     const refText = n ? `${n} reference(s) attached` : 'NO references attached';
-    if (!confirm(`${this.modeLabel()} for $${est.total.toFixed(2)} with ${refText}? This is charged to your MiniMax balance.`)) return;
+    const ask = this.isLocal()
+      ? `Run a ${this.duration()}s clip on your own GPU? It is free but slow, and local jobs run one at a time.`
+      : `${this.modeLabel()} for $${est.total.toFixed(2)} with ${refText}? This is charged to your MiniMax balance.`;
+    if (!confirm(ask)) return;
     try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch { /* ignore */ }
     this.busy.set(true);
     this.error.set('');
@@ -641,7 +655,7 @@ export class App implements OnInit {
   }
 
   async cancelJob(job: Job) {
-    if (!confirm('Cancel this queued job? MiniMax says cancelling a queued task is not charged.')) return;
+    if (!confirm(job.model === 'local-h3' ? 'Cancel this local job? A running job is stopped and its progress is lost.' : 'Cancel this queued job? MiniMax says cancelling a queued task is not charged.')) return;
     try {
       await firstValueFrom(this.http.post(`/api/jobs/${job.id}/cancel`, {}));
       await this.afterJobChange();
