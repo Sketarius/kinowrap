@@ -15,7 +15,7 @@ interface Ref {
   seconds?: number;
   character?: string; // who this reference belongs to (used to write the cast lines)
 }
-interface ModelInfo { label: string; minSeconds: number; rates: Record<string, number>; maxSeconds?: number; maxSecondsByRes?: Record<string, number>; ratios?: string[]; local?: boolean }
+interface ModelInfo { label: string; minSeconds: number; rates: Record<string, number>; maxSeconds?: number; maxSecondsByRes?: Record<string, number>; ratios?: string[]; local?: boolean; canUpscale?: boolean }
 interface Limits {
   prompt: number; referenceImages: number; videos: number; audios: number; totalFiles: number;
   clipMin: number; clipMax: number; videoTotalSeconds: number; audioTotalSeconds: number;
@@ -35,7 +35,7 @@ interface Job {
   refs?: StoredRef[]; refunded?: boolean;
   usage?: { output_seconds?: number; input_seconds?: number; total_seconds?: number; input_image_count?: number };
   failReason?: string | null; raw?: string; upgrade?: { lines: Line[]; total: number } | null; upgradedTo?: string;
-  hidden?: boolean; fileDeleted?: boolean; rawStatus?: string; progress?: { step: number; total: number; elapsed: number; eta: number }; startedAt?: string; meteredCost?: number; sources?: string[]; castBlock?: string;
+  hidden?: boolean; fileDeleted?: boolean; rawStatus?: string; progress?: { step: number; total: number; elapsed: number; eta: number; phase?: string }; upscaledTo?: string; sourceId?: string; startedAt?: string; meteredCost?: number; sources?: string[]; castBlock?: string;
 }
 // A reference as the server remembers it: a web link, or the name of an uploaded file it saved.
 interface StoredRef { type: RefType; role: Role; url?: string; file?: string; name?: string; seconds?: number; character?: string }
@@ -618,6 +618,24 @@ export class App implements OnInit {
 
   upgradeTitle(job: Job) {
     return job.upgrade ? job.upgrade.lines.map((l) => `${l.label}: $${l.cost.toFixed(2)}`).join('\n') : '';
+  }
+
+  // Upscaling is only offered for finished 480p clips made by the local model, never for MiniMax jobs.
+  canUpscale(job: Job) {
+    return job.model === 'local-h3' && job.type !== 'upscale' && !!job.file && job.status === 'succeeded' && job.resolution === '480P'
+      && !job.upscaledTo && !!this.models()['local-h3']?.canUpscale;
+  }
+
+  async upscale(job: Job) {
+    if (!confirm('Upscale this clip to 768p? It is free and runs on your GPU (usually under a minute), and the result is saved as a new clip.')) return;
+    this.error.set('');
+    try {
+      await firstValueFrom(this.http.post(`/api/jobs/${job.id}/upscale`, {}));
+      await Promise.all([this.loadStatus(), this.loadHistory()]);
+      this.ensurePolling();
+    } catch (e: any) {
+      this.error.set(e.error?.error ?? 'Upscale failed.');
+    }
   }
 
   async upgrade(job: Job) {

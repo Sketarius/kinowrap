@@ -231,6 +231,18 @@ It prints `STEP i/N` lines and `DONE <path>`; the video lands in `h3-localoutput
 - Nothing prints for a while: that's normal. Check `nvidia-smi` before assuming it's stuck.
 - `torch._dynamo` "recompile_limit" warnings are harmless.
 
+### Optional: upscale 480p clips to 768p
+
+Generating at 768p is about 3.7 times slower than 480p and limited to 5 seconds. A faster route to a sharper long clip is to make it at 480p and upscale it afterwards. Kinowrap can do that with [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) (BSD-3-Clause), running on your GPU through Vulkan:
+
+1. Download `realesrgan-ncnn-vulkan-20220424-windows.zip` (about 45 MB) from the [v0.2.5.0 release](https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0) (use the `ubuntu` zip on Linux).
+2. Unzip it so that `realesrgan-ncnn-vulkan.exe` and its `models` folder are in `h3-local	oolsesrgan` (or set `LOCAL_UPSCALER` to the program's path; the `models` folder must sit next to it).
+3. Restart Kinowrap. Finished **local 480p** clips now have an **Upscale to 768p** button.
+
+It uses the `realesr-animevideov3` model at 2x, scales the result to 1344×768 (or 768×1344), and keeps the original audio. The result is saved as a **new clip**; the original stays. A 5-second clip took about 9 seconds to upscale on an RTX 4060 laptop. The button is only shown for clips made by the local model, never for MiniMax jobs.
+
+This sharpens and cleans the picture, but it can't invent detail that the 480p clip never had, so expect it to look better than a plain resize and not like a native 768p generation. It also works frame by frame, so fine textures can shimmer slightly between frames.
+
 ### How it behaves
 
 - It needs a folder with `h3.py` and a `venv` inside it. Kinowrap looks in `../h3-local` (next to this folder), or in `LOCAL_H3_DIR` if you set it. The model is hidden when the folder isn't there.
@@ -286,6 +298,7 @@ All settings live in `server/.env` (copy from `server/.env.example`). Restart af
 | `LOCAL_H3_DIR` | `../h3-local` | Folder with `h3.py` and a `venv` for the optional [Local H3](#local-h3-optional-free-slow) model. |
 | `LOCAL_H3_STEPS` | `20` | Denoising steps for local jobs (more is slower). |
 | `LOCAL_H3_MAX_SECONDS` | `10` | Longest local clip. |
+| `LOCAL_UPSCALER` | `<LOCAL_H3_DIR>/tools/esrgan/realesrgan-ncnn-vulkan` | Real-ESRGAN program used by the optional [upscale button](#optional-upscale-480p-clips-to-768p). |
 
 ## Where your data lives
 
