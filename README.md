@@ -1,6 +1,6 @@
 # Kinowrap
 
-A local web app for making AI video with [MiniMax](https://www.minimax.io)'s video API. It runs on your own computer, shows the **price before every job**, keeps a **spending ledger**, and checks each request against MiniMax's documented rules before you pay for it.
+A local web app for making AI video with [MiniMax](https://www.minimax.io)'s video API. It runs on your own computer, shows the **price before every job**, keeps a **spending ledger**, and checks each request against MiniMax's documented rules before you pay for it. If you have an NVIDIA GPU it can also run a **free local copy of H3** and upscale the results (see [Local model and upscalers](#local-model-and-upscalers-optional)).
 
 > **Unofficial project.** Kinowrap is independent and is not affiliated with or endorsed by MiniMax. "MiniMax" and "H3" are their names, used here only to describe the API and models it talks to. You need your own MiniMax account and API key, and you pay MiniMax directly for what you generate.
 
@@ -11,7 +11,7 @@ A local web app for making AI video with [MiniMax](https://www.minimax.io)'s vid
 - [Quick start](#quick-start)
 - [Getting a MiniMax API key](#getting-a-minimax-api-key)
 - [Using Kinowrap](#using-kinowrap)
-- [Local H3 (optional)](#local-h3-optional-free-slow)
+- [Local model and upscalers (optional)](#local-model-and-upscalers-optional)
 - [Prices and limits](#prices-and-limits)
 - [Spending safety](#spending-safety)
 - [Settings](#settings)
@@ -30,19 +30,21 @@ A local web app for making AI video with [MiniMax](https://www.minimax.io)'s vid
 - **References**: add images, video and audio by link or by uploading files, with MiniMax's limits checked up front.
 - **Cast helper**: tell the app which voice belongs to which character and it writes the matching lines into your prompt.
 - **History** with search and filters, one-click reuse of past settings (including their references), download, and playback.
-- **Longer videos**: continue a clip from its last frame, then stitch several clips into one video.
+- **Longer videos**: continue a clip from its last frame (or use that frame as a reference), then stitch several clips into one video.
 - **Upgrade to 2K** for finished H3 clips, **cancel** queued jobs, and **reconcile** your ledger against MiniMax's own records.
 - **Library** of saved prompts and reference sets (for example, a character sheet).
+- **Optional local model (free, slow):** run H3 on your own NVIDIA GPU with text, first/last-frame and reference input, with progress and time-left, and upscale the results to 768p with a choice of AI upscalers.
 - Your API key stays on your computer, in the server. The web page never sees it.
 
 ## Requirements
 
-- **macOS, Linux or Windows 11.** The launcher has Windows handling (tested on Windows 11). The Angular 22 page needs Node 22.22.3 or newer (or 24.15+), which is newer than the server's 20.6 minimum.
-- **[Node.js](https://nodejs.org) 20.6 or newer** (the server reads its settings file with `node --env-file`). Check with `node -v`.
+- **macOS, Linux or Windows 11.** Everything except the optional local model works on all three. (Developed on macOS; the launcher has Windows handling and is tested on Windows 11.)
+- **[Node.js](https://nodejs.org)**: 20.6 or newer for the server (it reads its settings file with `node --env-file`). The Angular 22 page needs **Node 22.22.3 or newer** (or 24.15+), so install a current LTS. Check with `node -v`.
 - **npm** (comes with Node).
-- **[ffmpeg](https://ffmpeg.org/download.html)** on your PATH. It's only needed for "Continue from last frame", "Last frame as reference" and "Stitch". Check with `ffmpeg -version`. On macOS: `brew install ffmpeg`.
+- **[ffmpeg](https://ffmpeg.org/download.html)** on your PATH. It's needed for "Continue from last frame", "Last frame as reference", "Stitch" and upscaling. Check with `ffmpeg -version`. On macOS: `brew install ffmpeg`; on Windows: `winget install Gyan.FFmpeg`.
 - A modern browser.
-- A **MiniMax account with some balance** and a **pay-as-you-go API key** (next section).
+- A **MiniMax account with some balance** and a **pay-as-you-go API key** (next section). Not needed if you only use the local model.
+- **For the optional local model and upscalers only:** an NVIDIA GPU with 8 GB or more, on Windows or Linux. See [docs/local.md](docs/local.md).
 
 ## Quick start
 
@@ -54,23 +56,23 @@ cd kinowrap
 npm run setup
 
 # 2. Create your settings file and add your API key (see the next section)
-cp server/.env.example server/.env
+cp server/.env.example server/.env        # Windows PowerShell: copy server\.env.example server\.env
 #    then open server/.env in an editor and replace paste-your-key-here with your key
 
 # 3. Start everything
 npm start
 ```
 
-`npm start` runs the server (port 3000) and the page (port 4200), opens your browser at **http://localhost:4200**, and stops both when you press **Ctrl+C**.
+`npm start` runs the server (port 3000) and the page (port 4200), opens your browser at **http://localhost:4200**, and stops both when you press **Ctrl+C**. The first start takes a little longer while Angular builds the page.
 
-**Starting the two parts by hand** (for example on Windows), in two terminals:
+**Starting the two parts by hand**, in two terminals:
 
 ```bash
 cd server && node --env-file=.env server.mjs     # terminal 1
 cd client && npm start                            # terminal 2, then open http://localhost:4200
 ```
 
-The first start takes a little longer while Angular builds the page.
+Want the free local model too? Run `npm run local -- status` to see what your computer supports and what to install. It's all in [docs/local.md](docs/local.md).
 
 ## Getting a MiniMax API key
 
@@ -105,13 +107,13 @@ Describe the video in the **Prompt** box. MiniMax accepts up to **7,000 characte
 
 | Setting | What it does |
 |---|---|
-| **Model** | **H3** (768p or 2K, 4–15 s) or **H3 Max** (480p or 768p, 5–15 s). Resolution options and prices follow the model. |
+| **Model** | **H3** (768p or 2K, 4–15 s) or **H3 Max** (480p or 768p, 5–15 s). If the [local model](#local-model-and-upscalers-optional) is installed, **Local (free, slow)** is listed too. Resolution options and prices follow the model. |
 | **Resolution** | Shows the price per second next to each option. |
-| **Aspect ratio** | `21:9`, `16:9`, `4:3`, `1:1`, `3:4`, `9:16`. Text-only jobs need a specific ratio. With first/last-frame images the ratio follows your image and the box is locked to "Adaptive". Reference jobs allow either. |
+| **Aspect ratio** | `21:9`, `16:9`, `4:3`, `1:1`, `3:4`, `9:16`. Text-only jobs need a specific ratio. With first/last-frame images the ratio follows your image and the box is locked to "Adaptive". Reference jobs allow either. (Local: 16:9 or 9:16.) |
 | **Prompt expansion** | How much MiniMax rewrites your prompt first: `disabled`, `balanced` (MiniMax's default) or `quality`. |
 | **Length** | A slider; the allowed range depends on the model. |
 
-The **Mode** line under the settings tells you which of three modes your inputs put you in: *text-to-video*, *image-to-video (first/last frame)* or *reference-to-video*. MiniMax doesn't allow first/last frame images **and** reference media in the same job, and the app will tell you if you mix them.
+The **Mode** line under the settings tells you which of three modes your inputs put you in: *text-to-video*, *image-to-video (first/last frame)* or *reference-to-video*. MiniMax doesn't allow first/last frame images **and** reference media in the same job (outside sources agree, and the local model uses two separate models for them), and the app will tell you if you mix them.
 
 ### 3. Add references (optional)
 
@@ -148,11 +150,11 @@ Use the ▲ ▼ arrows to reorder references (a voice only swaps with other voic
 
 ### 5. Check the price and generate
 
-The price box shows each line (the clip itself, extra images, reference video). **Generate** shows the total. Clicking it opens a confirmation that names the mode and the number of references. Nothing is sent until you confirm.
+The price box shows each line (the clip itself, extra images, reference video). **Generate** shows the total. Clicking it opens a confirmation that names the mode and the number of references. Nothing is sent until you confirm. (Local jobs are free; the box shows a rough run time instead once you've made one of that kind.)
 
 ### 6. Watch the job
 
-The new job appears in **History** and is checked every 10 seconds. A 15-second 768p clip usually takes a few minutes. When it finishes, the video downloads to your computer and plays in the card; the tab title changes and, if you allowed notifications, you get an alert.
+The new job appears in **History** and is checked every 10 seconds. A 15-second 768p clip usually takes a few minutes. When it finishes, the video downloads to your computer and plays in the card; the tab title changes and, if you allowed notifications, you get an alert. Local jobs show a progress bar, the step, the time elapsed and about how long is left.
 
 ### 7. History actions
 
@@ -160,10 +162,11 @@ The new job appears in **History** and is checked every 10 seconds. A 15-second 
 |---|---|
 | **Download** | Saves the video file. |
 | **Reuse settings** | Loads the prompt, settings **and references** (with their character names) back into the form. |
-| **Continue from last frame** | Extracts the clip's final frame and sets it as the first frame of a new job. Keeps the look; motion and audio don't carry over. |
-| **Last frame as reference** | Extracts the clip's final frame and adds it as a **reference image** (the next free "Image N"; Kinowrap tells you which number, and gives it the character name "the last frame of the previous clip" so the cast lines add "Image N shows the last frame of the previous clip." to your prompt; rename it if you like). The clip's own references, with their character names, are kept, so characters and voices carry over. A looser continuation than the button above, but the only one that works together with references: first/last frames and references can't be combined in one job. If the clip was itself made from frames, those are dropped and the last frame becomes the only reference. |
+| **Continue from last frame** | Extracts the clip's final frame and sets it as the first frame of a new job. Keeps the look; motion and audio don't carry over. Frames can't be combined with references. |
+| **Last frame as reference** | Extracts the clip's final frame and adds it as a **reference image** (the next free "Image N"; Kinowrap tells you which number, and gives it the character name "the last frame of the previous clip" so the cast lines add "Image N shows the last frame of the previous clip." to your prompt; rename it if you like). The clip's own references, with their character names, are kept, so characters and voices carry over. A looser continuation than the button above, but the one that works together with references. If the clip was itself made from frames, those are dropped and the last frame becomes the only reference. |
 | **Upgrade to 2K** | Regenerates a finished H3 768p clip at 2K (clips from the last 7 days). Shows the price first. |
-| **Cancel** | For jobs still queued. MiniMax doesn't charge for cancelled queued tasks. Running jobs can't be cancelled. |
+| **Upscale to 768p** | **Local clips only.** Upscales a finished local 480p clip with the AI upscaler chosen in the dropdown beside the button, and saves the result as a new clip. See [docs/local.md](docs/local.md#upscaling-480p-clips-to-768p). |
+| **Cancel** | For jobs still queued. MiniMax doesn't charge for cancelled queued tasks, and running MiniMax jobs can't be cancelled. Local jobs can be cancelled while queued or running. |
 | **Mark not charged** | For failed jobs MiniMax didn't bill, so your totals stay right. |
 | **Delete file** | Removes the downloaded video from your computer; the job and its cost stay in History. |
 | **Hide** | Hides a job from the list (spending totals are unchanged). |
@@ -185,89 +188,20 @@ Under the prompt, **Library** saves things you reuse:
 
 Click **Use** to load an item back in.
 
-## Local H3 (optional, free, slow)
+## Local model and upscalers (optional)
 
-If a local copy of MiniMax H3 is installed (see [DiffSynth-Studio](https://github.com/modelscope/DiffSynth-Studio)'s NF4 low-VRAM example), Kinowrap can queue jobs to it. A **Local (free, slow)** model then appears in the Model list.
+If you have an **NVIDIA GPU with 8 GB or more** (Windows or Linux), Kinowrap can run MiniMax H3 on your own computer: **free, but slow**. A **Local (free, slow)** model appears in the Model list, supports text, first/last-frame and reference input, queues jobs one at a time, shows step-by-step progress and time left, and costs $0 (it never counts toward your spend). Finished 480p local clips can be upscaled to 768p with a dropdown of AI upscalers, from fast anime models to the detailed but slow SeedVR2.
 
-### What you need
+Setting it up is handled by a script:
 
-- An **NVIDIA GPU with 8 GB of VRAM** or more (tested on an RTX 4060 Laptop), about **16 GB of RAM**, and **40 GB of free disk** (about 28 GB of weights for text and frames, plus 10.5 GB more the first time you use references).
-- Python 3.11 or 3.12, git, and [ffmpeg](https://ffmpeg.org/download.html) on your PATH.
-- Windows or Linux with a CUDA-capable PyTorch. macOS and AMD aren't covered: `h3.py` asks for CUDA.
-
-### Setting it up
-
-Do this once, in a terminal. The folder must be named `h3-local` and sit **next to** the `kinowrap` folder (or set `LOCAL_H3_DIR`). The commands below are for Windows PowerShell; on Linux use `venv/bin/python` instead of `venv\Scripts\python.exe`.
-
-```powershell
-# from the folder that contains kinowrap
-mkdir h3-local; cd h3-local
-python -m venv venv
-
-# PyTorch with CUDA (pick the CUDA version your driver supports; cu126 is what was tested)
-venv\Scripts\python.exe -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
-
-# DiffSynth-Studio, which runs the model
-git clone https://github.com/modelscope/DiffSynth-Studio
-cd DiffSynth-Studio; ..\venv\Scripts\python.exe -m pip install -e .; cd ..
-venv\Scripts\python.exe -m pip install av bitsandbytes modelscope
-
-# Kinowrap's launcher for it
-copy ..\kinowrap\local\h3.py h3.py
+```bash
+npm run local -- status                      # what your computer supports, and what is installed
+npm run local -- install h3 --weights all    # the local model (asks before each big download)
+npm run local -- install upscaler all        # the three small upscalers
+npm run local -- install seedvr2             # the detailed, slow upscaler
 ```
 
-Then try it. The first run downloads about **28 GB** of weights from ModelScope into `h3-local\models` (this takes a while and happens only once):
-
-```powershell
-venv\Scripts\python.exe -u h3.py "a paper boat on a puddle" --seconds 1 --steps 10
-```
-
-It prints `STEP i/N` lines and `DONE <path>`; the video lands in `h3-local\outputs`. The first step is slow. If this works, restart Kinowrap and **Local (free, slow)** appears in the Model list. The first job that uses references downloads the extra 10.5 GB.
-
-`h3.py` is the whole interface Kinowrap uses, and you can run it yourself the same way. It sets `MODELSCOPE_ENDPOINT=https://modelscope.ai` (faster than modelscope.cn for many connections) and changes into its own folder, so the weights always load from `h3-local\models`.
-
-**If it fails:**
-- `os error 1455` or "invalid python storage": Windows ran out of memory it can promise. `h3.py` already reads weights without memory-mapping them to avoid this; close other heavy programs, and make sure the Windows paging file isn't tiny.
-- A CUDA out-of-memory error: close apps that use the GPU, or lower the clip length.
-- Nothing prints for a while: that's normal. Check `nvidia-smi` before assuming it's stuck.
-- `torch._dynamo` "recompile_limit" warnings are harmless.
-
-### Optional: upscale 480p clips to 768p
-
-Generating at 768p is about 3.7 times slower than 480p and limited to 5 seconds. A faster route to a sharper long clip is to make it at 480p and upscale it afterwards. Kinowrap can do that with free AI upscalers that run on your GPU through Vulkan. Each program goes in its own folder under `h3-local\tools`, and each one you add shows up in a dropdown next to the **Upscale to 768p** button on finished **local 480p** clips (restart Kinowrap after adding one). You can install any or all of them:
-
-| Folder | Download (Windows; use the `ubuntu` zip on Linux) | Models it adds |
-|---|---|---|
-| `tools\esrgan` | [Real-ESRGAN `realesrgan-ncnn-vulkan-20220424-windows.zip`](https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0), about 45 MB, BSD-3-Clause | Anime / video, Anime / illustration, Live-action / photo |
-| `tools\realcugan` | [Real-CUGAN `realcugan-ncnn-vulkan-20220728-windows.zip`](https://github.com/nihui/realcugan-ncnn-vulkan/releases/tag/20220728), about 46 MB, MIT | Anime, faithful (conservative) and Anime, cleaned up (denoise) |
-| `tools\waifu2x` | [waifu2x `waifu2x-ncnn-vulkan-20250915-windows.zip`](https://github.com/nihui/waifu2x-ncnn-vulkan/releases/tag/20250915), about 35 MB, MIT | Anime, gentle |
-
-Unzip each so the program and its model folders sit directly in that folder (for example `h3-local\tools\realcugan\realcugan-ncnn-vulkan.exe` next to `models-se`), not in an extra subfolder. To keep them somewhere else, set `LOCAL_UPSCALERS_DIR`.
-
-| Choice | Best for | Speed (RTX 4060 laptop, per second of video) |
-|---|---|---|
-| Anime / video (Real-ESRGAN, 2x) | animation and clean footage; made for video | about 3 s |
-| Anime, faithful (Real-CUGAN, 2x) | animation where you want the least processed look | about 3 s |
-| Anime, cleaned up (Real-CUGAN, 2x) | animation with noise or blocky compression | about 3 s |
-| Anime, gentle (waifu2x, 2x) | clean lines, very little invented detail | about 5 s |
-| Anime / illustration (Real-ESRGAN, 4x) | smooth lines and flat colour | about 16 s |
-| Live-action / photo (Real-ESRGAN, 4x) | real-looking footage; keeps the most texture | about 45 s |
-
-Pick a choice in the dropdown (it is remembered). The result is scaled to 1344×768 (or 768×1344), keeps the original audio, and is saved as a **new clip**, so you can upscale the same clip with a different model to compare. The button is only shown for clips made by the local model, never for MiniMax jobs.
-
-This sharpens and cleans the picture, but it can't invent detail that the 480p clip never had, so expect it to look better than a plain resize and not like a native 768p generation. It also works frame by frame, so fine textures can shimmer slightly between frames. Much of an "AI look" in generated animation comes from the generator itself and can't be removed by upscaling. To add another ncnn upscaler, add an entry to `UPSCALER_CHOICES` in `server/server.mjs`.
-
-### How it behaves
-
-- It needs a folder with `h3.py` and a `venv` inside it. Kinowrap looks in `../h3-local` (next to this folder), or in `LOCAL_H3_DIR` if you set it. The model is hidden when the folder isn't there.
-- It supports all three modes: **text-to-video**, **first/last frame**, and **references** (images, video, audio, in the order you list them). References need the Ref2VA weights as well as the FL2VA ones; `h3.py` picks the right model itself.
-- `h3.py` is called as `python h3.py --seconds N --steps N --seed N [--vertical|--auto-orient] [--first img] [--last img] [--ref image:path ...] --out file.mp4 -- "prompt"` and must print `STEP i/N` lines (the page shows them as progress).
-- **480p** (832×480) or **768p** (1344×768), 16:9 or 9:16 (or "adaptive", which follows your first image), 1 to `LOCAL_H3_MAX_SECONDS` seconds (default 10; 768p is limited to 5). Whole seconds snap to the model's frame counts (17n+5). The same reference limits as MiniMax apply, but local references are free.
-- While a job runs, History shows the step, a progress bar, the time elapsed and about how long is left (the same line `h3.py` prints in a terminal). The first step is slow and its time estimate is rough; it settles after step 2. Before you generate, the price box shows a guess from your last finished job of the same kind and length.
-- Jobs run **one at a time**; the rest wait their turn and can be cancelled (a running job is stopped). Nothing is sent to MiniMax.
-- They show in History as **free**, cost $0, and never count toward your spend, daily limit or Insights.
-- Prompts: the local model reads plain text like "Image 1 shows Alice" (the cast lines work), but it was trained on a longer structured prompt format for video and audio references, so results with those may be weaker than MiniMax's.
-- Measured on an RTX 4060 Laptop (8 GB), per step: about 6 s for a 1-second text clip, about 20 s with first/last frames or a reference image, about 38 s with a reference video and audio; 5 seconds is about 52 s per step for text. Add a minute or so for encoding. A 5-second text clip at 20 steps takes about 18 minutes. 768p is about 3.7 times slower than 480p: about 22 s per step for a 1-second text clip, 32 s with a reference image, and 220 s for 5 seconds (about 75 minutes at 20 steps, using 6.2 GB of VRAM). A 10-second 480p clip is about 120 s per step for text and about 150 s with a reference image (roughly 45 to 55 minutes at 20 steps), so lower `LOCAL_H3_STEPS` for drafts.
+Everything about it, including speeds, limits, upscaler comparisons, manual setup and troubleshooting, is in **[docs/local.md](docs/local.md)**. On macOS, or without an NVIDIA GPU, none of this is available and nothing else is affected.
 
 ## Prices and limits
 
@@ -283,8 +217,9 @@ Prices below are MiniMax's pay-as-you-go rates when this was written. **They can
 
 - Upgrading a 768p H3 clip to 2K costs about **$0.10 per second** by the app's reading of MiniMax's pricing page (output plus the original video as input). That is on top of the original clip, so generating at 2K from the start is cheaper if you already know you want 2K.
 - Example: a 10-second 768p H3 clip with 3 reference images and 2 audio clips costs **$0.80**.
+- The **local model is free** (it uses your own GPU and electricity).
 
-**Limits MiniMax documents** (checked by the app before sending): prompt 7,000 characters; up to 9 reference images, 1 first frame and 1 last frame; up to 3 reference videos and 3 audio clips; 12 reference files in total; reference videos total 15 s; request body 64 MB.
+**Limits MiniMax documents** (checked by the app before sending): prompt 7,000 characters; up to 9 reference images, 1 first frame and 1 last frame; up to 3 reference videos and 3 audio clips; 12 reference files in total; reference videos total 15 s; request body 64 MB. The local model follows the same reference limits.
 
 ## Spending safety
 
@@ -296,6 +231,7 @@ Prices below are MiniMax's pay-as-you-go rates when this was written. **They can
 - **Failed jobs**: MiniMax doesn't document whether failed jobs are billed, so the app counts them as spent until you tell it otherwise. Compare against your billing page, then use **Mark not charged**.
 - **Insights & reconcile** (at the top): spending per day and per model, and a **Reconcile with MiniMax** button that compares the last 7 days with MiniMax's own task records. It is read-only. It flags cost differences, tasks made outside the app, and failed jobs MiniMax metered nothing for (offering to mark them not charged, after a warning to check your billing page).
 - Test prompts with **short 4-second clips** before a long one.
+- Local jobs, stitches and upscales are free and are left out of all spending totals.
 
 ## Settings
 
@@ -309,10 +245,10 @@ All settings live in `server/.env` (copy from `server/.env.example`). Restart af
 | `LOW_BALANCE_USD` | `3` | Show a warning below this balance. |
 | `PORT` | `3000` | Server port. If you change it, change `client/proxy.conf.json` too. |
 | `MINIMAX_BASE_URL` | `https://api.minimax.io` | MiniMax API address. Kinowrap targets the international platform; other regions are untested. |
-| `LOCAL_H3_DIR` | `../h3-local` | Folder with `h3.py` and a `venv` for the optional [Local H3](#local-h3-optional-free-slow) model. |
+| `LOCAL_H3_DIR` | `../h3-local` | Folder with the local model (`h3.py` and its `venv`). The Local model is hidden when it isn't there. |
 | `LOCAL_H3_STEPS` | `20` | Denoising steps for local jobs (more is slower). |
-| `LOCAL_H3_MAX_SECONDS` | `10` | Longest local clip. |
-| `LOCAL_UPSCALERS_DIR` | `<LOCAL_H3_DIR>/tools` | Folder holding the optional upscaler programs (`esrgan`, `realcugan`, `waifu2x`) behind the [upscale button](#optional-upscale-480p-clips-to-768p). |
+| `LOCAL_H3_MAX_SECONDS` | `10` | Longest local clip (local 768p is limited to 5). |
+| `LOCAL_UPSCALERS_DIR` | `<LOCAL_H3_DIR>/tools` | Folder holding the upscaler programs. |
 
 ## Where your data lives
 
@@ -321,14 +257,15 @@ Everything is stored in `server/data/` on your computer. It is excluded from git
 | Path | Contents |
 |---|---|
 | `ledger.json` | Every job and its cost. **Don't delete it**; the spending math uses it. |
-| `videos/` | Downloaded videos, including stitched ones. |
-| `frames/` | Last frames extracted for "Continue from last frame". |
+| `videos/` | Downloaded and generated videos, including stitched ones (`stitch-*`), local clips (`local-*`) and upscales (`local-up-*`). |
+| `frames/` | Last frames extracted for "Continue from last frame" and "Last frame as reference". |
 | `refs/` | Copies of files you uploaded as references, so Reuse can bring them back. |
 | `library.json` | Your saved prompts and reference sets. |
+| `local/` | Temporary working files for a running local job or upscale. Cleared when the job ends. |
 
-Your browser also keeps an unfinished-prompt draft in local storage. **Back up `server/data/`** if you care about your history.
+Your browser also keeps an unfinished-prompt draft and your upscaler choice in local storage. **Back up `server/data/`** if you care about your history. The local model's own files live outside the project, in the `h3-local` folder (see [docs/local.md](docs/local.md#what-goes-where)).
 
-**What is sent to MiniMax:** your prompt, settings and references. Reference links are fetched by MiniMax's servers; uploaded files are sent inside the request. MiniMax keeps task records for about 7 days.
+**What is sent to MiniMax:** your prompt, settings and references. Reference links are fetched by MiniMax's servers; uploaded files are sent inside the request. MiniMax keeps task records for about 7 days. Local jobs send nothing anywhere.
 
 ## Troubleshooting
 
@@ -337,27 +274,32 @@ Your browser also keeps an unfinished-prompt draft in local storage. **Back up `
 | "Can't reach the local server" in the page | The server isn't running. Use `npm start`, or start it by hand (see Quick start). |
 | `npm start` says a port is in use | Something is already running on 3000 or 4200 (probably an earlier Kinowrap). Stop it with Ctrl+C. |
 | `npm start` says `server/.env` is missing | Run `cp server/.env.example server/.env` and add your key. |
-| `Missing MINIMAX_API_KEY` | The key line in `server/.env` is empty or still the placeholder. |
+| `Missing MINIMAX_API_KEY` | The key line in `server/.env` is empty. (A placeholder is fine if you only use the local model.) |
 | `node: bad option: --env-file` | Your Node is too old. Install Node 20.6 or newer. |
+| The page won't build: "requires a minimum Node.js version" | Angular 22 needs Node 22.22.3 or newer (or 24.15+). Install a current LTS. |
 | "login fail" / HTTP 401 | The key is wrong, was disabled, or is the wrong kind. Create a new **pay-as-you-go** key. |
 | "insufficient balance" / HTTP 402 | Top up at **Account → Billing → Balance**, then sync your balance in the app. |
 | HTTP 422 "sensitive content" | MiniMax's content check rejected the prompt or a reference. Reword it. |
 | HTTP 429 | Rate limit. Wait a bit and try again. |
 | "returned text/html instead of image" | The link points at a web page, not the file. Use a direct link (for GitHub, the **Raw** address). |
 | The Generate button is greyed out | Look for the red problem list above it, a missing prompt, or a price over your remaining balance. |
-| "Continue from last frame" / "Stitch" fails | Install ffmpeg and make sure `ffmpeg -version` works in the same terminal. |
+| "Continue from last frame", "Last frame as reference", "Stitch" or an upscale fails | Install ffmpeg and make sure `ffmpeg -version` works in the same terminal. |
 | Balance in the app looks wrong | Click the balance pill and enter the number from your billing page. |
 | A job failed and I can't see why | Open the card's **Raw reply** section. MiniMax doesn't always give a reason. |
+| The Local model or an upscaler is missing, or a local job is very slow or fails | See [docs/local.md](docs/local.md#troubleshooting), and run `npm run local -- status`. |
 
 ## How it works
 
 ```
 Browser (Angular page, :4200)  ->  Kinowrap server (127.0.0.1:3000)  ->  MiniMax API (api.minimax.io)
+                                                |
+                                                +->  local H3 (h3.py on your GPU) and upscalers, one job at a time
 ```
 
-- **`server/server.mjs`** is a small Node server with no dependencies. It holds the API key, validates every request against MiniMax's rules, keeps the ledger, polls job status, downloads finished videos, and runs ffmpeg for frame extraction and stitching.
+- **`server/server.mjs`** is a small Node server with no dependencies. It holds the API key, validates every request against MiniMax's rules, keeps the ledger, polls job status, downloads finished videos, and runs ffmpeg for frame extraction and stitching. For local jobs it runs `h3.py` and the upscalers as child processes from a one-at-a-time queue and reads their progress.
 - **`client/`** is an Angular page. In development its dev server forwards `/api`, `/videos`, `/frames` and `/refs` to the Kinowrap server (`client/proxy.conf.json`).
-- **`start.mjs`** starts both and opens the browser.
+- **`start.mjs`** starts both and opens the browser (macOS, Linux and Windows).
+- **`local/h3.py`** is the launcher for the local model; **`scripts/local-setup.mjs`** (`npm run local`) installs and checks the local tools.
 
 MiniMax endpoints used: `POST /v2/video_generation`, `GET /v2/query/video_generation/{id}` (and the list form for reconcile), `POST /v2/video_regeneration` (2K upgrade) and `DELETE /v2/video_generation/{id}` (cancel).
 
@@ -367,7 +309,10 @@ MiniMax endpoints used: `POST /v2/video_generation`, `GET /v2/query/video_genera
 - **Failed-job billing is undocumented.** The app errs on the side of counting them until you say otherwise.
 - **The 2K-upgrade price is the app's reading** of MiniMax's pricing page and may be off.
 - **Cast pairing isn't guaranteed.** It improves the odds that voices land on the right characters; it can't force it. One review found generated audio doesn't reproduce your uploaded clip exactly.
-- **Windows** support is new and lightly tested (launcher, page, history, references, stitch and last-frame with a fake key).
+- **First/last frames and references can't be combined**, by MiniMax's API (per outside sources; MiniMax's own page for it wasn't found) and by the local model (two separate models).
+- **The local model is slow and was measured on one machine** (an RTX 4060 Laptop with 8 GB), so your times will differ. Some large combinations are impractical (see [docs/local.md](docs/local.md#how-long-things-take)). It needs an NVIDIA GPU, so it is Windows and Linux only.
+- **Upscalers sharpen but don't create real detail**, and the strongest one (SeedVR2) redraws the picture.
+- **Windows** support is new and lightly tested (launcher, page, history, references, stitch, last-frame and the local tools, mostly with a fake key). The setup script's full from-scratch install (Python environment and model downloads) has not been run end to end on a clean machine; the upscaler install and every "already installed" path have.
 - **Local only.** There is no login. Don't expose the server to the internet.
 - Prices and limits are copied from MiniMax's docs and can change.
 
@@ -376,14 +321,19 @@ MiniMax endpoints used: `POST /v2/video_generation`, `GET /v2/query/video_genera
 ```bash
 # the page
 cd client && npm install && npm start      # dev server on :4200 with live reload
-cd client && npx ng build                  # production build check
+cd client && npx ng build                  # production build check (the CSS has a small size budget)
 
 # the server, with a fake key (no real requests are made unless you submit a job)
 cd server && MINIMAX_API_KEY=fake PORT=3113 node server.mjs
 node --check server/server.mjs             # quick syntax check
+node --check scripts/local-setup.mjs
+
+# the local tools
+npm run local -- status                    # see docs/local.md
+npm run local -- install all --dry-run     # shows exactly what the setup script would do
 ```
 
-To try changes without touching your real data or being charged, run a second copy on other ports with a fake key and a copy of `server/data`, and point a second `ng serve --port 4201 --proxy-config <your-config>` at it.
+To try changes without touching your real data or being charged, run a second copy on other ports with a fake key and a copy of `server/data`, and point a second `ng serve --port 4201 --proxy-config <your-config>` at it. The data folder is fixed next to `server.mjs`, so copy `server.mjs` to a scratch folder with its own `data/`.
 
 Project layout:
 
@@ -391,10 +341,13 @@ Project layout:
 kinowrap/
 ├── start.mjs            one-command launcher
 ├── server/
-│   ├── server.mjs       the local server (all API logic)
+│   ├── server.mjs       the local server (all API logic, the local queue, the upscalers)
 │   ├── .env.example     settings template (copy to .env)
 │   └── data/            your data (git-ignored)
-└── client/              Angular page (src/app/app.ts, app.html, app.css)
+├── client/              Angular page (src/app/app.ts, app.html, app.css)
+├── local/h3.py          launcher for the local H3 model
+├── scripts/local-setup.mjs   setup and status script for the local tools (npm run local)
+└── docs/local.md        the full guide to the local model and upscalers
 ```
 
 ## License

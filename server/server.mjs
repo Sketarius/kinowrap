@@ -41,8 +41,20 @@ const UPSCALER_CHOICES = [
   { id: 'realesrgan-x4plus-anime', label: 'Anime / illustration (Real-ESRGAN, medium)', dir: 'esrgan', program: 'realesrgan-ncnn-vulkan', scale: 4, args: ['-n', 'realesrgan-x4plus-anime', '-s', '4', '-m', 'models'], need: 'models/realesrgan-x4plus-anime.param', perSecond: 16, note: 'Smooth lines and flat colour.' },
   { id: 'realesrgan-x4plus', label: 'Live-action / photo (Real-ESRGAN, slow)', dir: 'esrgan', program: 'realesrgan-ncnn-vulkan', scale: 4, args: ['-n', 'realesrgan-x4plus', '-s', '4', '-m', 'models'], need: 'models/realesrgan-x4plus.param', perSecond: 45, note: 'General photo model; keeps the most texture.' },
 ];
-const upscalerExe = (u) => path.join(LOCAL_UPSCALERS_DIR, u.dir, exe(u.program));
-const upscalersAvailable = () => UPSCALER_CHOICES.filter((u) => existsSync(upscalerExe(u)) && existsSync(path.join(LOCAL_UPSCALERS_DIR, u.dir, u.need)));
+// SeedVR2 (ByteDance, Apache 2.0) is a video diffusion upscaler run through its own Python venv. It takes the whole video, not frames.
+// These are the settings that fit an 8 GB GPU (3B GGUF with block swapping and 512 px VAE tiles).
+UPSCALER_CHOICES.push({
+  id: 'seedvr2-3b', label: 'SeedVR2 3B (most detail, slow)', kind: 'seedvr2', dir: 'seedvr2/repo',
+  exePath: path.join(LOCAL_UPSCALERS_DIR, 'seedvr2', 'venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python'),
+  needs: ['inference_cli.py', 'models/SEEDVR2/seedvr2_ema_3b-Q8_0.gguf', 'models/SEEDVR2/ema_vae_fp16.safetensors'],
+  args: ['--dit_model', 'seedvr2_ema_3b-Q8_0.gguf', '--model_dir', 'models/SEEDVR2', '--resolution', '768', '--batch_size', '9',
+    '--blocks_to_swap', '32', '--swap_io_components', '--dit_offload_device', 'cpu', '--vae_offload_device', 'cpu',
+    '--vae_encode_tiled', '--vae_encode_tile_size', '512', '--vae_encode_tile_overlap', '64',
+    '--vae_decode_tiled', '--vae_decode_tile_size', '512', '--vae_decode_tile_overlap', '64'],
+  perSecond: 90, note: 'A video diffusion model: the most added detail, but it redraws, so faces can change. About 90 s per second of video on an RTX 4060 laptop.',
+});
+const upscalerExe = (u) => u.exePath ?? path.join(LOCAL_UPSCALERS_DIR, u.dir, exe(u.program));
+const upscalersAvailable = () => UPSCALER_CHOICES.filter((u) => existsSync(upscalerExe(u)) && (u.needs ?? [u.need]).every((n) => existsSync(path.join(LOCAL_UPSCALERS_DIR, u.dir, n))));
 const LOCAL_H3_STEPS = Number(process.env.LOCAL_H3_STEPS || 20);
 const LOCAL_H3_MAX_SECONDS = Number(process.env.LOCAL_H3_MAX_SECONDS || 10);
 const LOCAL = 'local-h3';
@@ -453,27 +465,53 @@ async function runUpscale(id, job, ledger) {
     const input = path.join(OUT_DIR, src.file);
     await fs.mkdir(path.join(dir, 'in'), { recursive: true });
     await fs.mkdir(path.join(dir, 'out'), { recursive: true });
-    await run('ffmpeg', ['-y', '-v', 'error', '-i', input, path.join(dir, 'in', '%05d.png')]);
-    if (cancelled()) throw new Error('cancelled');
+    const choice = UPSCALER_CHOICES.find((u) => u.id === job.upscaler);
     const started = Date.now();
-    await new Promise((resolve, reject) => {
-      const choice = UPSCALER_CHOICES.find((u) => u.id === job.upscaler);
-      const child = spawn(upscalerExe(choice), ['-i', path.join(dir, 'in'), '-o', path.join(dir, 'out'), ...choice.args, '-f', 'png'], { cwd: path.join(LOCAL_UPSCALERS_DIR, choice.dir), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const report = (pct) => {
+      const elapsed = (Date.now() - started) / 1000;
+      localProgress.set(id, { step: Math.round(pct), total: 100, elapsed: Math.round(elapsed), eta: pct > 0 ? Math.round((elapsed * (100 - pct)) / pct) : 0, phase: 'upscale' });
+    };
+    // Runs the program, reading progress with `parse(text)` (returns a percent or null). Rejects with the last error-looking line.
+    const runProgram = (cmd, args, cwd, parse, env) => new Promise((resolve, reject) => {
+      const child = spawn(cmd, args, { cwd, env: env ?? process.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
       localRunning.child = child;
+      const tail = [];
       const onData = (d) => {
-        const pcts = [...d.toString().matchAll(/(\d+(?:\.\d+)?)%/g)].map((m) => Number(m[1]));
-        if (!pcts.length) return;
-        const pct = Math.max(...pcts);
-        const elapsed = (Date.now() - started) / 1000;
-        localProgress.set(id, { step: Math.round(pct), total: 100, elapsed: Math.round(elapsed), eta: pct > 0 ? Math.round((elapsed * (100 - pct)) / pct) : 0, phase: 'upscale' });
+        const text = d.toString();
+        const pct = parse(text);
+        if (pct != null) report(pct);
+        for (const l of text.split(/[\r\n]+/)) if (l.trim()) { tail.push(l.trim()); if (tail.length > 20) tail.shift(); }
       };
       child.stdout.on('data', onData);
       child.stderr.on('data', onData);
       child.on('error', reject);
-      child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`The upscaler exited with code ${code}.`))));
+      child.on('close', (code) => (code === 0 ? resolve() : reject(new Error([...tail].reverse().find((t) => /error|memory/i.test(t)) || `The upscaler exited with code ${code}.`))));
     });
+    let source; // what the final encode reads: PNG frames, or SeedVR2's finished video
+    if (choice.kind === 'seedvr2') {
+      const seedOut = path.join(dir, 'seedvr2.mp4');
+      // Its log says e.g. "Encoding batch 2/6"; the three phases took about 20%, 30% and 50% of the time when measured.
+      const weights = { Encoding: [0, 20], Upscaling: [20, 30], Decoding: [50, 50] };
+      let last = 0;
+      await runProgram(upscalerExe(choice), ['-u', 'inference_cli.py', input, ...choice.args, '--output', seedOut], path.join(LOCAL_UPSCALERS_DIR, choice.dir), (text) => {
+        for (const m of text.matchAll(/(Encoding|Upscaling|Decoding) batch (\d+)\/(\d+)/g)) {
+          const [from, span] = weights[m[1]];
+          last = Math.max(last, from + (span * (Number(m[2]) - 1)) / Number(m[3]));
+        }
+        return last || null;
+      }, { ...process.env, PYTHONIOENCODING: 'utf-8' });
+      source = ['-i', seedOut];
+    } else {
+      await run('ffmpeg', ['-y', '-v', 'error', '-i', input, path.join(dir, 'in', '%05d.png')]);
+      if (cancelled()) throw new Error('cancelled');
+      await runProgram(upscalerExe(choice), ['-i', path.join(dir, 'in'), '-o', path.join(dir, 'out'), ...choice.args, '-f', 'png'], path.join(LOCAL_UPSCALERS_DIR, choice.dir), (text) => {
+        const pcts = [...text.matchAll(/(\d+(?:\.\d+)?)%/g)].map((m) => Number(m[1]));
+        return pcts.length ? Math.max(...pcts) : null;
+      });
+      source = ['-framerate', '24', '-i', path.join(dir, 'out', '%05d.png')];
+    }
     if (cancelled()) throw new Error('cancelled');
-    await run('ffmpeg', ['-y', '-v', 'error', '-framerate', '24', '-i', path.join(dir, 'out', '%05d.png'), '-i', input, '-map', '0:v', '-map', '1:a?',
+    await run('ffmpeg', ['-y', '-v', 'error', ...source, '-i', input, '-map', '0:v', '-map', '1:a?',
       '-vf', "scale='if(gt(iw,ih),1344,768)':'if(gt(iw,ih),768,1344)':flags=lanczos", '-c:v', 'libx264', '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'copy', '-shortest', out]);
   } catch (e) {
     error = e;
