@@ -15,7 +15,7 @@ interface Ref {
   seconds?: number;
   character?: string; // who this reference belongs to (used to write the cast lines)
 }
-interface ModelInfo { label: string; minSeconds: number; rates: Record<string, number>; maxSeconds?: number; maxSecondsByRes?: Record<string, number>; ratios?: string[]; local?: boolean; canUpscale?: boolean; upscalers?: { id: string; label: string; perSecond: number; note: string }[] }
+interface ModelInfo { label: string; minSeconds: number; rates: Record<string, number>; maxSeconds?: number; maxSecondsByRes?: Record<string, number>; ratios?: string[]; local?: boolean; canUpscale?: boolean; canInterpolate?: boolean; upscalers?: { id: string; label: string; perSecond: number; note: string; for: string }[] }
 interface Limits {
   prompt: number; referenceImages: number; videos: number; audios: number; totalFiles: number;
   clipMin: number; clipMax: number; videoTotalSeconds: number; audioTotalSeconds: number;
@@ -35,7 +35,7 @@ interface Job {
   refs?: StoredRef[]; refunded?: boolean;
   usage?: { output_seconds?: number; input_seconds?: number; total_seconds?: number; input_image_count?: number };
   failReason?: string | null; raw?: string; upgrade?: { lines: Line[]; total: number } | null; upgradedTo?: string;
-  hidden?: boolean; fileDeleted?: boolean; rawStatus?: string; progress?: { step: number; total: number; elapsed: number; eta: number; phase?: string }; upscaledTo?: string; sourceId?: string; upscaler?: string; startedAt?: string; meteredCost?: number; sources?: string[]; castBlock?: string;
+  hidden?: boolean; fileDeleted?: boolean; rawStatus?: string; progress?: { step: number; total: number; elapsed: number; eta: number; phase?: string }; upscaledTo?: string; sourceId?: string; upscaler?: string; fps?: number; smoothedTo?: string; startedAt?: string; meteredCost?: number; sources?: string[]; castBlock?: string;
 }
 // A reference as the server remembers it: a web link, or the name of an uploaded file it saved.
 interface StoredRef { type: RefType; role: Role; url?: string; file?: string; name?: string; seconds?: number; character?: string }
@@ -76,6 +76,10 @@ export class App implements OnInit {
   // Which AI upscaler the "Upscale to 768p" buttons use (local clips only); remembered between visits.
   upscaler = signal<string>((() => { try { return localStorage.getItem('kinowrap.upscaler') ?? ''; } catch { return ''; } })());
   upscalers = computed(() => this.models()['local-h3']?.upscalers ?? []);
+  upscalerGroups = computed(() => [
+    { name: 'Live-action / realistic', items: this.upscalers().filter((u) => u.for === 'live-action') },
+    { name: 'Animation / drawn', items: this.upscalers().filter((u) => u.for !== 'live-action') },
+  ].filter((g) => g.items.length));
   chosenUpscaler = computed(() => (this.upscalers().some((u) => u.id === this.upscaler()) ? this.upscaler() : this.upscalers()[0]?.id ?? ''));
   duration = signal(6);
   resolution = signal('768P');
@@ -629,7 +633,7 @@ export class App implements OnInit {
 
   // Upscaling is only offered for finished 480p clips made by the local model, never for MiniMax jobs.
   canUpscale(job: Job) {
-    return job.model === 'local-h3' && job.type !== 'upscale' && !!job.file && job.status === 'succeeded' && job.resolution === '480P'
+    return job.model === 'local-h3' && job.type !== 'upscale' && job.type !== 'interpolate' && !!job.file && job.status === 'succeeded' && ['480P', '576P', '640P'].includes(job.resolution)
       && !!this.models()['local-h3']?.canUpscale;
   }
 
@@ -640,6 +644,24 @@ export class App implements OnInit {
 
   upscalerLabel(job: Job) {
     return this.upscalers().find((u) => u.id === job.upscaler)?.label ?? '';
+  }
+
+  // "Smooth to 48 fps" doubles the frame rate of a finished local clip (any size, including upscaled ones) with RIFE. Local clips only.
+  canInterpolate(job: Job) {
+    return job.model === 'local-h3' && job.type !== 'interpolate' && !job.fps && !job.smoothedTo && !!job.file && job.status === 'succeeded'
+      && !!this.models()['local-h3']?.canInterpolate;
+  }
+
+  async interpolate(job: Job) {
+    if (!confirm('Smooth this clip to 48 fps? It is free and runs on your GPU (usually well under a minute), and the result is saved as a new clip. If you also want to upscale it, upscale first and smooth the result.')) return;
+    this.error.set('');
+    try {
+      await firstValueFrom(this.http.post(`/api/jobs/${job.id}/interpolate`, {}));
+      await Promise.all([this.loadStatus(), this.loadHistory()]);
+      this.ensurePolling();
+    } catch (e: any) {
+      this.error.set(e.error?.error ?? 'Could not start smoothing.');
+    }
   }
 
   async upscale(job: Job) {

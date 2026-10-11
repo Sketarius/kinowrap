@@ -74,7 +74,7 @@ def main():
     ap.add_argument("--seconds", type=float, default=1)
     ap.add_argument("--steps", type=int, default=20)
     ap.add_argument("--vertical", action="store_true")
-    ap.add_argument("--res", type=int, choices=(480, 768), default=480, help="short side in pixels (768 is 1344x768, much slower)")
+    ap.add_argument("--res", type=int, choices=(480, 576, 640, 704, 768), default=480, help="short side in pixels: 480 = 832x480, 576 = 1024x576, 640 = 1152x640, 704 = 1280x704, 768 = 1344x768 (bigger is slower)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out")
     ap.add_argument("--first", help="first-frame image")
@@ -104,7 +104,7 @@ def main():
         if pic:
             with _I.open(pic) as im:
                 vertical = im.height > im.width
-    long_side = {480: 832, 768: 1344}[a.res]
+    long_side = {480: 832, 576: 1024, 640: 1152, 704: 1280, 768: 1344}[a.res]  # every side is a multiple of 32
     width, height = (a.res, long_side) if vertical else (long_side, a.res)
     out = a.out
     if not out:
