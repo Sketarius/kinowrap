@@ -353,7 +353,11 @@
           @if (j.file && j.type !== 'stitch') { <button type="button" (click)="lastFrameAsReference(j)" title="Looser continuation: this clip's last frame is added as a reference image, and the clip's own references are kept (characters, voices).">Last frame as reference</button> }
           @if (canUpscale(j)) {
             <select class="upsel" aria-label="Upscaler model" (change)="setUpscaler($any($event.target).value)">
-              @for (u of upscalers(); track u.id) { <option [value]="u.id" [selected]="u.id === chosenUpscaler()" [title]="u.note">{{ u.label }}</option> }
+              @for (g of upscalerGroups(); track g.name) {
+                <optgroup [label]="g.name">
+                  @for (u of g.items; track u.id) { <option [value]="u.id" [selected]="u.id === chosenUpscaler()" [title]="u.note">{{ u.label }}</option> }
+                </optgroup>
+              }
             </select>
             <button type="button" (click)="upscale(j)" title="Sharpen this clip with the chosen AI upscaler and save it as a new 768p video (free, runs on your GPU)">Upscale to 768p</button>
           }

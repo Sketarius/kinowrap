@@ -123,21 +123,25 @@ Notes:
 
 768p generation is about 3.7 times slower and capped at 5 seconds, so the faster route to a sharper long clip is to **make it at 480p and upscale it**. Each finished local 480p clip has an **Upscale to 768p** button with a dropdown of upscalers (your choice is remembered). The result is scaled to exactly 1344×768 (or 768×1344), keeps the original audio, and is saved as a **new clip**, so you can try several models on the same clip and compare. Upscales are free, run one at a time in the same queue as generation, and show a percentage and time left.
 
+**Pick the model for the kind of footage.** The dropdown groups the choices that way, with live-action first. This matters a lot: on a realistic clip the anime-tuned models make faces and skin look waxy and plastic, while the photo-style and SeedVR2 models look natural. (Tested on a realistic 480p city-street clip: SeedVR2 gave visible irises, skin texture and individual hair strands; the Real-ESRGAN photo model was natural but softer; the fast video model made a smoothed, painted-looking face.)
+
 | Choice | Program | Best for | Time per second of video |
 |---|---|---|---|
-| Anime / video | Real-ESRGAN, 2x | animation and clean footage; made for video | about 3 s |
-| Anime, faithful | Real-CUGAN, 2x | animation where you want the least processed look | about 3 s |
-| Anime, cleaned up | Real-CUGAN, 2x | animation with noise or blocky compression | about 3 s |
-| Anime, gentle | waifu2x, 2x | clean lines, very little invented detail | about 5 s |
-| Anime / illustration | Real-ESRGAN, 4x | smooth lines and flat colour | about 16 s |
-| Live-action / photo | Real-ESRGAN, 4x | real-looking footage; keeps the most texture | about 45 s |
-| SeedVR2 3B (most detail, slow) | SeedVR2 | the most added detail, on any content | about 90 s |
+| **Live-action / realistic** | | | |
+| SeedVR2 3B (most detail, slow) | SeedVR2 | realistic footage and anything else; the most added detail | about 90 s (3 min for 2 s at 768p; about 7 min for 2.3 s at 1080p) |
+| Photo-style (Real-ESRGAN, slow) | Real-ESRGAN, 4x | realistic footage: natural skin and texture, softer than SeedVR2 | about 45 s |
+| **Animation / drawn** | | | |
+| Fast video model (Real-ESRGAN) | Real-ESRGAN, 2x | animation and clean footage; made for video | about 3 s |
+| Faithful (Real-CUGAN) | Real-CUGAN, 2x | animation where you want the least processed look | about 3 s |
+| Cleaned up (Real-CUGAN) | Real-CUGAN, 2x | animation with noise or blocky compression | about 3 s |
+| Gentle (waifu2x) | waifu2x, 2x | clean lines, very little invented detail | about 5 s |
+| Illustration (Real-ESRGAN, medium) | Real-ESRGAN, 4x | smooth lines and flat colour | about 16 s |
 
 A choice only appears if it is installed (see [the script](#set-it-up-with-the-script)). To keep the programs somewhere else, set `LOCAL_UPSCALERS_DIR`.
 
 **The six ncnn models** (from Real-ESRGAN, Real-CUGAN and waifu2x) are small, fast programs that run through Vulkan and upscale each frame separately. They sharpen and clean the picture, but can't invent detail the clip never had, and fine textures can shimmer slightly between frames.
 
-**SeedVR2** is different: a video diffusion model ([ByteDance, Apache-2.0](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler)) that works on whole shots, so it adds much more detail. Kinowrap runs the 3B model in its 8 GB-friendly form (GGUF quantised, with part of the model swapped to system RAM and 512 px VAE tiles). A 2-second clip took about 3 minutes (encode, upscale, decode). The catch: it **redraws** the picture. In a test on a cartoon clip it gave clearly more fur texture and eye detail than the other models, but the eyes also changed from the original drawing, and its frame-to-frame stability was no better than Real-CUGAN's. Try it on a real clip next to the others before relying on it.
+**SeedVR2** is different: a video diffusion model ([ByteDance, Apache-2.0](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler)) that works on whole shots, so it adds much more detail. Kinowrap runs the 3B model in its 8 GB-friendly form (GGUF quantised, with part of the model swapped to system RAM and 512 px VAE tiles). A 2-second clip took about 3 minutes (encode, upscale, decode). The catch: it **redraws** the picture. On a cartoon clip it gave clearly more fur texture and eye detail than the other models, but the eyes also changed from the original drawing; on a realistic clip it was the most natural of all, but a bigger upscale factor (1080p instead of 768p) redrew the face a little differently, and its frame-to-frame stability was no better than Real-CUGAN's. Try it on a real clip next to the others before relying on it.
 
 None of the upscalers can remove an "AI look" that comes from the generation itself.
 

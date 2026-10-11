@@ -81,19 +81,19 @@ const UPSCALERS = {
     name: 'Real-ESRGAN (BSD-3-Clause)', sizeMB: 46, unsupported: process.platform === 'darwin',
     url: `https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-${platformZip('windows', 'ubuntu')}.zip`,
     program: 'realesrgan-ncnn-vulkan', check: ['models/realesr-animevideov3-x2.param', 'models/realesrgan-x4plus.param'],
-    adds: 'Anime / video, Anime / illustration, Live-action / photo',
+    adds: 'Photo-style (live-action), plus Fast video model and Illustration (animation)',
   },
   realcugan: {
     name: 'Real-CUGAN (MIT)', sizeMB: 46, unsupported: process.platform === 'darwin',
     url: `https://github.com/nihui/realcugan-ncnn-vulkan/releases/download/20220728/realcugan-ncnn-vulkan-20220728-${platformZip('windows', 'ubuntu')}.zip`,
     program: 'realcugan-ncnn-vulkan', check: ['models-se/up2x-conservative.param', 'models-se/up2x-denoise2x.param'],
-    adds: 'Anime, faithful; Anime, cleaned up',
+    adds: 'Faithful and Cleaned up (animation)',
   },
   waifu2x: {
     name: 'waifu2x (MIT)', sizeMB: 36, unsupported: process.platform === 'darwin',
     url: `https://github.com/nihui/waifu2x-ncnn-vulkan/releases/download/20250915/waifu2x-ncnn-vulkan-20250915-${platformZip('windows', 'linux')}.zip`,
     program: 'waifu2x-ncnn-vulkan', check: ['models-cunet/noise1_scale2.0x_model.param'],
-    adds: 'Anime, gentle',
+    adds: 'Gentle (animation)',
   },
 };
 
@@ -238,7 +238,7 @@ function status() {
     say(`  ${tick(existsSync(path.join(dir, exe(u.program))) && filesExist(u.check.map((c) => path.join(dir, c))))} ${u.name}: ${u.adds} [${id}]`);
   }
   const sv = existsSync(venvPython(SEEDVR2_DIR)) && existsSync(path.join(SEEDVR2_DIR, 'repo', 'inference_cli.py')) && filesExist(SEEDVR2.files.map((f) => path.join(seedvr2Models, f.name)));
-  say(`  ${tick(sv)} SeedVR2 3B: most detail, slow (about 90 s per second of video) [seedvr2]`);
+  say(`  ${tick(sv)} SeedVR2 3B: the best for realistic footage, slow (about 90 to 180 s per second of video) [seedvr2]`);
   say();
   say('Install what is missing with:  npm run local -- install <h3 | upscaler <name|all> | seedvr2 | all>');
   say('Restart Kinowrap afterwards so it notices.');

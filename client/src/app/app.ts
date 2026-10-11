@@ -15,7 +15,7 @@ interface Ref {
   seconds?: number;
   character?: string; // who this reference belongs to (used to write the cast lines)
 }
-interface ModelInfo { label: string; minSeconds: number; rates: Record<string, number>; maxSeconds?: number; maxSecondsByRes?: Record<string, number>; ratios?: string[]; local?: boolean; canUpscale?: boolean; upscalers?: { id: string; label: string; perSecond: number; note: string }[] }
+interface ModelInfo { label: string; minSeconds: number; rates: Record<string, number>; maxSeconds?: number; maxSecondsByRes?: Record<string, number>; ratios?: string[]; local?: boolean; canUpscale?: boolean; upscalers?: { id: string; label: string; perSecond: number; note: string; for: string }[] }
 interface Limits {
   prompt: number; referenceImages: number; videos: number; audios: number; totalFiles: number;
   clipMin: number; clipMax: number; videoTotalSeconds: number; audioTotalSeconds: number;
@@ -76,6 +76,10 @@ export class App implements OnInit {
   // Which AI upscaler the "Upscale to 768p" buttons use (local clips only); remembered between visits.
   upscaler = signal<string>((() => { try { return localStorage.getItem('kinowrap.upscaler') ?? ''; } catch { return ''; } })());
   upscalers = computed(() => this.models()['local-h3']?.upscalers ?? []);
+  upscalerGroups = computed(() => [
+    { name: 'Live-action / realistic', items: this.upscalers().filter((u) => u.for === 'live-action') },
+    { name: 'Animation / drawn', items: this.upscalers().filter((u) => u.for !== 'live-action') },
+  ].filter((g) => g.items.length));
   chosenUpscaler = computed(() => (this.upscalers().some((u) => u.id === this.upscaler()) ? this.upscaler() : this.upscalers()[0]?.id ?? ''));
   duration = signal(6);
   resolution = signal('768P');

@@ -190,7 +190,7 @@ Click **Use** to load an item back in.
 
 ## Local model and upscalers (optional)
 
-If you have an **NVIDIA GPU with 8 GB or more** (Windows or Linux), Kinowrap can run MiniMax H3 on your own computer: **free, but slow**. A **Local (free, slow)** model appears in the Model list, supports text, first/last-frame and reference input, queues jobs one at a time, shows step-by-step progress and time left, and costs $0 (it never counts toward your spend). Finished 480p local clips can be upscaled to 768p with a dropdown of AI upscalers, from fast anime models to the detailed but slow SeedVR2.
+If you have an **NVIDIA GPU with 8 GB or more** (Windows or Linux), Kinowrap can run MiniMax H3 on your own computer: **free, but slow**. A **Local (free, slow)** model appears in the Model list, supports text, first/last-frame and reference input, queues jobs one at a time, shows step-by-step progress and time left, and costs $0 (it never counts toward your spend). Finished 480p local clips can be upscaled to 768p with a dropdown of AI upscalers grouped by footage type: fast models for animation, and the natural-looking (but slower) Real-ESRGAN photo model and SeedVR2 for realistic video, where the anime models look waxy.
 
 Setting it up is handled by a script:
 

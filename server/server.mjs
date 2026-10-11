@@ -34,12 +34,12 @@ const LOCAL_H3_PYTHON = path.join(LOCAL_H3_DIR, 'venv', process.platform === 'wi
 const exe = (name) => (process.platform === 'win32' ? `${name}.exe` : name);
 // `perSecond` is roughly how long one second of video takes on an RTX 4060 laptop. `args` are the program's own options.
 const UPSCALER_CHOICES = [
-  { id: 'realesr-animevideov3', label: 'Anime / video (fast)', dir: 'esrgan', program: 'realesrgan-ncnn-vulkan', scale: 2, args: ['-n', 'realesr-animevideov3', '-s', '2', '-m', 'models'], need: 'models/realesr-animevideov3-x2.param', perSecond: 3, note: 'Real-ESRGAN, made for video. Fast; good for animation and clean footage.' },
-  { id: 'realcugan-conservative', label: 'Anime, faithful (Real-CUGAN)', dir: 'realcugan', program: 'realcugan-ncnn-vulkan', scale: 2, args: ['-n', '-1', '-s', '2', '-m', 'models-se'], need: 'models-se/up2x-conservative.param', perSecond: 3, note: 'Conservative: stays close to the original drawing, so it looks the least processed.' },
-  { id: 'realcugan-denoise', label: 'Anime, cleaned up (Real-CUGAN)', dir: 'realcugan', program: 'realcugan-ncnn-vulkan', scale: 2, args: ['-n', '2', '-s', '2', '-m', 'models-se'], need: 'models-se/up2x-denoise2x.param', perSecond: 3, note: 'Also removes noise and compression blocks; slightly more smoothing.' },
-  { id: 'waifu2x-cunet', label: 'Anime, gentle (waifu2x)', dir: 'waifu2x', program: 'waifu2x-ncnn-vulkan', scale: 2, args: ['-n', '1', '-s', '2', '-m', 'models-cunet'], need: 'models-cunet/noise1_scale2.0x_model.param', perSecond: 5, note: 'The classic anime upscaler: clean lines, little invented detail.' },
-  { id: 'realesrgan-x4plus-anime', label: 'Anime / illustration (Real-ESRGAN, medium)', dir: 'esrgan', program: 'realesrgan-ncnn-vulkan', scale: 4, args: ['-n', 'realesrgan-x4plus-anime', '-s', '4', '-m', 'models'], need: 'models/realesrgan-x4plus-anime.param', perSecond: 16, note: 'Smooth lines and flat colour.' },
-  { id: 'realesrgan-x4plus', label: 'Live-action / photo (Real-ESRGAN, slow)', dir: 'esrgan', program: 'realesrgan-ncnn-vulkan', scale: 4, args: ['-n', 'realesrgan-x4plus', '-s', '4', '-m', 'models'], need: 'models/realesrgan-x4plus.param', perSecond: 45, note: 'General photo model; keeps the most texture.' },
+  { id: 'realesr-animevideov3', label: 'Fast video model (Real-ESRGAN)', dir: 'esrgan', program: 'realesrgan-ncnn-vulkan', scale: 2, args: ['-n', 'realesr-animevideov3', '-s', '2', '-m', 'models'], need: 'models/realesr-animevideov3-x2.param', perSecond: 3, note: 'Real-ESRGAN, made for video. Fast; good for animation and clean footage.' },
+  { id: 'realcugan-conservative', label: 'Faithful (Real-CUGAN)', dir: 'realcugan', program: 'realcugan-ncnn-vulkan', scale: 2, args: ['-n', '-1', '-s', '2', '-m', 'models-se'], need: 'models-se/up2x-conservative.param', perSecond: 3, note: 'Conservative: stays close to the original drawing, so it looks the least processed.' },
+  { id: 'realcugan-denoise', label: 'Cleaned up (Real-CUGAN)', dir: 'realcugan', program: 'realcugan-ncnn-vulkan', scale: 2, args: ['-n', '2', '-s', '2', '-m', 'models-se'], need: 'models-se/up2x-denoise2x.param', perSecond: 3, note: 'Also removes noise and compression blocks; slightly more smoothing.' },
+  { id: 'waifu2x-cunet', label: 'Gentle (waifu2x)', dir: 'waifu2x', program: 'waifu2x-ncnn-vulkan', scale: 2, args: ['-n', '1', '-s', '2', '-m', 'models-cunet'], need: 'models-cunet/noise1_scale2.0x_model.param', perSecond: 5, note: 'The classic anime upscaler: clean lines, little invented detail.' },
+  { id: 'realesrgan-x4plus-anime', label: 'Illustration (Real-ESRGAN, medium)', dir: 'esrgan', program: 'realesrgan-ncnn-vulkan', scale: 4, args: ['-n', 'realesrgan-x4plus-anime', '-s', '4', '-m', 'models'], need: 'models/realesrgan-x4plus-anime.param', perSecond: 16, note: 'Smooth lines and flat colour.' },
+  { id: 'realesrgan-x4plus', label: 'Photo-style (Real-ESRGAN, slow)', dir: 'esrgan', program: 'realesrgan-ncnn-vulkan', scale: 4, args: ['-n', 'realesrgan-x4plus', '-s', '4', '-m', 'models'], need: 'models/realesrgan-x4plus.param', perSecond: 45, note: 'General photo model: natural skin and texture, but softer than SeedVR2.' },
 ];
 // SeedVR2 (ByteDance, Apache 2.0) is a video diffusion upscaler run through its own Python venv. It takes the whole video, not frames.
 // These are the settings that fit an 8 GB GPU (3B GGUF with block swapping and 512 px VAE tiles).
@@ -53,6 +53,12 @@ UPSCALER_CHOICES.push({
     '--vae_decode_tiled', '--vae_decode_tile_size', '512', '--vae_decode_tile_overlap', '64'],
   perSecond: 90, note: 'A video diffusion model: the most added detail, but it redraws, so faces can change. About 90 s per second of video on an RTX 4060 laptop.',
 });
+// Which kind of footage each choice suits. The dropdown groups by this, and live-action comes first because the anime models
+// make realistic footage look waxy (tested on a realistic clip: the Real-ESRGAN photo model and SeedVR2 looked natural, the anime models plastic).
+const UPSCALER_FOR = {
+  'realesr-animevideov3': 'animation', 'realcugan-conservative': 'animation', 'realcugan-denoise': 'animation', 'waifu2x-cunet': 'animation',
+  'realesrgan-x4plus-anime': 'animation', 'realesrgan-x4plus': 'live-action', 'seedvr2-3b': 'live-action',
+};
 const upscalerExe = (u) => u.exePath ?? path.join(LOCAL_UPSCALERS_DIR, u.dir, exe(u.program));
 const upscalersAvailable = () => UPSCALER_CHOICES.filter((u) => existsSync(upscalerExe(u)) && (u.needs ?? [u.need]).every((n) => existsSync(path.join(LOCAL_UPSCALERS_DIR, u.dir, n))));
 const LOCAL_H3_STEPS = Number(process.env.LOCAL_H3_STEPS || 20);
@@ -88,7 +94,7 @@ const MODELS = {
 // Local H3 on your own GPU: free, slow, one job at a time.
 if (existsSync(LOCAL_H3_SCRIPT) && existsSync(LOCAL_H3_PYTHON)) {
   MODELS[LOCAL] = {
-    label: 'Local (free, slow)', local: true, upscalers: upscalersAvailable().map(({ id, label, perSecond, note }) => ({ id, label, perSecond, note })), canUpscale: upscalersAvailable().length > 0, minSeconds: 1, maxSeconds: LOCAL_H3_MAX_SECONDS,
+    label: 'Local (free, slow)', local: true, upscalers: upscalersAvailable().map(({ id, label, perSecond, note }) => ({ id, label, perSecond, note, for: UPSCALER_FOR[id] ?? 'animation' })).sort((a, b) => (a.for === b.for ? 0 : a.for === 'live-action' ? -1 : 1)), canUpscale: upscalersAvailable().length > 0, minSeconds: 1, maxSeconds: LOCAL_H3_MAX_SECONDS,
     rates: { '480P': 0, '768P': 0 }, maxSecondsByRes: { '768P': Math.min(5, LOCAL_H3_MAX_SECONDS) },
     refVideoRates: {}, freeImages: 0, extraImage: 0, ratios: ['16:9', '9:16'],
   };
