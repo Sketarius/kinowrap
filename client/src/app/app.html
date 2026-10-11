@@ -338,6 +338,9 @@
                 <p class="hint">Preparing frames, {{ since(j.startedAt) }} so far…</p>
               } @else {
                 <p class="hint">Starting, {{ since(j.startedAt) }} so far (the first step is slow, and shows a time estimate once it finishes).</p>
+                @if (minutesSince(j.startedAt) >= 15) {
+                  <p class="error">This is taking far longer than normal. A first step that takes over about 15 minutes usually means the GPU's memory is full, and it may never finish in a sensible time. Consider cancelling and using a smaller size or a shorter clip.</p>
+                }
               }
             } @else {
               <p class="hint">Waiting for its turn…</p>

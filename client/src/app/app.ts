@@ -699,6 +699,11 @@ export class App implements OnInit {
     return s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
   }
 
+  // Minutes since an ISO time (0 if unknown). Used to warn about a local job whose first step is taking far too long.
+  minutesSince(iso?: string) {
+    return iso ? (Date.now() - new Date(iso).getTime()) / 60000 : 0;
+  }
+
   since(iso?: string) {
     return iso ? this.fmtTime((Date.now() - new Date(iso).getTime()) / 1000) : 'a moment';
   }

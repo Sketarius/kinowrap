@@ -113,6 +113,7 @@ Measured on an RTX 4060 Laptop (8 GB), per denoising step, plus about a minute t
 | 480p, 1 s, reference video + audio | about 38 s | about 13 min |
 | 480p, 10 s, reference image | about 150 s | about 55 min |
 | 640p, 5 s, 2 reference images + 1 reference audio | about 2.5 min (a user's report from Kinowrap's estimate after step 1; the finished run time wasn't recorded) | about 50 min |
+| 640p, **10 s**, 2 reference images + 1 reference audio | **never finished step 1 in 69 minutes** (cancelled) | not practical |
 | 576p, 1 s, text | about 15 s | about 5 min |
 | 576p, 5 s, text | about 85 s | about 28 min |
 | 640p, 1 s, text | about 18 s | about 6 min |
@@ -140,7 +141,7 @@ Local generation can run at five sizes (width × height, 16:9; 9:16 swaps them),
 | **704p** (1280×704) | about 21 s | not measured | roughly 720p |
 | **768p** (1344×768) | about 22 s | about 220 s | |
 
-Two things stand out. **There is a big jump between 480p and 576p** (about 2.5 times slower at 1 second). I haven't verified why; my guess is that 480p needs much less shuffling of the model's weights in and out of GPU memory. And **the 5-second numbers grow faster than the 1-second ones**, so long clips get expensive quickly. A 5-second clip at 20 steps takes about 18 minutes at 480p, 30 at 576p, 40 at 640p and 75 at 768p. Sizes above 480p are limited to 5 seconds by default because longer ones weren't measured and are likely to be slow. To try longer ones, set `LOCAL_H3_MAX_SECONDS_ABOVE_480=10` in `server/.env` and restart Kinowrap (not while a local job is running: restarting stops it), then watch the first step time and cancel if it is hopeless. A rough guide from 480p, where 10 seconds took about 2.3 times as long per step as 5 seconds: a 10-second clip at 640p could take around 6 minutes per step with references (about 2 hours at 20 steps), but that is a guess, not a measurement.
+Two things stand out. **There is a big jump between 480p and 576p** (about 2.5 times slower at 1 second). I haven't verified why; my guess is that 480p needs much less shuffling of the model's weights in and out of GPU memory. And **the 5-second numbers grow faster than the 1-second ones**, so long clips get expensive quickly. A 5-second clip at 20 steps takes about 18 minutes at 480p, 30 at 576p, 40 at 640p and 75 at 768p. Sizes above 480p are limited to 5 seconds by default because longer ones weren't measured and are likely to be slow. To try longer ones, set `LOCAL_H3_MAX_SECONDS_ABOVE_480=10` in `server/.env` and restart Kinowrap (not while a local job is running: restarting stops it), then watch the first step time and cancel if it is hopeless. Be careful with this: a 10-second 640p job with 2 reference images and 1 reference audio ran for 69 minutes without finishing its first step and had to be cancelled, so it is not practical on an 8 GB GPU (the same 5-second job took about 2.5 minutes per step). Text-only 10-second clips above 480p are untested.
 
 A reasonable routine: draft at 480p with 10 steps, then either upscale the keeper (below) or, for a short clip you care about, regenerate it at 576p or 640p as a middle ground. Reference images, video and audio make every size slower (see the table above). Combining them with 768p and longer clips is where jobs stopped being practical in testing; 640p with references worked.
 
@@ -238,7 +239,7 @@ Start with `npm run local -- status`.
 | No Smooth to 48 fps button | RIFE isn't installed (`npm run local -- install tools rife`), or the clip is already smoothed, is a MiniMax clip, or is still running. Restart Kinowrap after installing. |
 | `os error 1455` or "invalid python storage" | Windows ran out of memory it can promise. `h3.py` already avoids memory-mapping the weights, which fixed this here; close other heavy programs and check the Windows paging file isn't tiny. |
 | A CUDA out-of-memory error | Close apps that use the GPU, or make the clip shorter or smaller. |
-| A job runs for ages and no step finishes | The GPU's memory is full and it is spilling into system memory. Cancel it, and use 480p (then upscale) or a shorter clip. Reference images plus audio at 768p and several seconds are the worst case; 640p with the same references ran fine in one report. |
+| A job runs for ages and no step finishes | The GPU's memory is full and it is spilling into system memory. Cancel it, and use 480p (then upscale) or a shorter clip. Reference images plus audio at 768p and several seconds are the worst case; 640p with the same references ran fine at 5 seconds in one report but not at 10. Kinowrap now warns on the job card when a local first step passes 15 minutes. |
 | Nothing prints for a while | Normal: the first step is slow. Check `nvidia-smi`; if the GPU is at 100% it is working. |
 | SeedVR2 runs out of memory or is extremely slow | Kinowrap already uses 512 px tiles and block swapping. Close other GPU programs; if it still fails, use another upscaler for that clip. |
 | A crashed run still holds the GPU | A leftover `python` process. End it in Task Manager (or `taskkill /F /IM python.exe` if nothing else is using Python), then retry. |
