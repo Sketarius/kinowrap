@@ -68,6 +68,7 @@ const upscalersAvailable = () => UPSCALER_CHOICES.filter((u) => existsSync(upsca
 const LOCAL_H3_STEPS = Number(process.env.LOCAL_H3_STEPS || 20);
 const LOCAL_H3_MAX_SECONDS = Number(process.env.LOCAL_H3_MAX_SECONDS || 10);
 const LOCAL = 'local-h3';
+const UPSCALABLE_FROM = ['480P', '576P', '640P']; // 704P is too close to the 768p target to be worth upscaling
 
 if (!API_KEY) {
   console.error('Missing MINIMAX_API_KEY. Copy .env.example to .env and set it.');
@@ -99,7 +100,9 @@ const MODELS = {
 if (existsSync(LOCAL_H3_SCRIPT) && existsSync(LOCAL_H3_PYTHON)) {
   MODELS[LOCAL] = {
     label: 'Local (free, slow)', local: true, upscalers: upscalersAvailable().map(({ id, label, perSecond, note }) => ({ id, label, perSecond, note, for: UPSCALER_FOR[id] ?? 'animation' })).sort((a, b) => (a.for === b.for ? 0 : a.for === 'live-action' ? -1 : 1)), canUpscale: upscalersAvailable().length > 0, canInterpolate: rifeAvailable(), minSeconds: 1, maxSeconds: LOCAL_H3_MAX_SECONDS,
-    rates: { '480P': 0, '768P': 0 }, maxSecondsByRes: { '768P': Math.min(5, LOCAL_H3_MAX_SECONDS) },
+    rates: { '480P': 0, '576P': 0, '640P': 0, '704P': 0, '768P': 0 },
+    // Everything above 480p is capped at 5 seconds: measured step times grow quickly with size (see docs/local.md).
+    maxSecondsByRes: Object.fromEntries(['576P', '640P', '704P', '768P'].map((r) => [r, Math.min(5, LOCAL_H3_MAX_SECONDS)])),
     refVideoRates: {}, freeImages: 0, extraImage: 0, ratios: ['16:9', '9:16'],
   };
 }
@@ -627,7 +630,7 @@ function runNextLocal() {
     if (job.type === 'upscale') return runUpscale(id, job, l);
     if (job.type === 'interpolate') return runInterpolate(id, job, l);
     const out = path.join(OUT_DIR, `${id}.mp4`);
-    const args = ['-u', LOCAL_H3_SCRIPT, '--seconds', String(job.duration), '--steps', String(job.steps), '--seed', String(job.seed), '--res', job.resolution === '768P' ? '768' : '480', '--out', out];
+    const args = ['-u', LOCAL_H3_SCRIPT, '--seconds', String(job.duration), '--steps', String(job.steps), '--seed', String(job.seed), '--res', String(parseInt(job.resolution, 10)), '--out', out];
     if (job.ratio === '9:16') args.push('--vertical');
     if (job.ratio === 'adaptive') args.push('--auto-orient');
     const inputs = localInputs.get(id);
@@ -1115,7 +1118,7 @@ const server = http.createServer(async (req, res) => {
         if (job.model !== LOCAL || job.type === 'upscale') return send(res, 400, { error: 'Only clips made by the local model can be upscaled here.' });
         if (job.type === 'interpolate' || job.fps) return send(res, 400, { error: 'Smoothed 48 fps clips can not be upscaled. Upscale the original clip first, then smooth the result.' });
         if (!MODELS[LOCAL]?.canUpscale) return send(res, 400, { error: 'The upscaler is not installed (see the README).' });
-        if (job.status !== 'succeeded' || !job.file || job.resolution !== '480P') return send(res, 400, { error: 'Only finished 480p local clips can be upscaled.' });
+        if (job.status !== 'succeeded' || !job.file || !UPSCALABLE_FROM.includes(job.resolution)) return send(res, 400, { error: 'Only finished local clips below 768p can be upscaled.' });
         const { model: chosen } = await readBody(req);
         const upscaler = chosen || MODELS[LOCAL].upscalers[0].id;
         if (!MODELS[LOCAL].upscalers.some((u) => u.id === upscaler)) return send(res, 400, { error: `Unknown or missing upscaler model: ${upscaler}.` });

@@ -633,7 +633,7 @@ export class App implements OnInit {
 
   // Upscaling is only offered for finished 480p clips made by the local model, never for MiniMax jobs.
   canUpscale(job: Job) {
-    return job.model === 'local-h3' && job.type !== 'upscale' && job.type !== 'interpolate' && !!job.file && job.status === 'succeeded' && job.resolution === '480P'
+    return job.model === 'local-h3' && job.type !== 'upscale' && job.type !== 'interpolate' && !!job.file && job.status === 'succeeded' && ['480P', '576P', '640P'].includes(job.resolution)
       && !!this.models()['local-h3']?.canUpscale;
   }
 

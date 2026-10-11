@@ -89,9 +89,9 @@ Pick **Local (free, slow)** as the Model. It keeps the page's normal controls:
 
 | Control | Local behaviour |
 |---|---|
-| **Resolution** | **480P** (832×480 or 480×832) or **768P** (1344×768 or 768×1344), shown as "free". |
+| **Resolution** | **480P** (832×480), **576P** (1024×576), **640P** (1152×640), **704P** (1280×704, about 720p) or **768P** (1344×768), or the same sizes turned on their side for 9:16. Shown as "free". See [Picking a resolution](#picking-a-resolution). |
 | **Aspect ratio** | 16:9 or 9:16. With a first/last frame or references you can also pick **Adaptive**, which follows your first image. |
-| **Length** | 1 to 10 seconds at 480p (`LOCAL_H3_MAX_SECONDS`), 1 to 5 seconds at 768p. Lengths snap to the model's frame counts (the real length is printed in the terminal). |
+| **Length** | 1 to 10 seconds at 480p (`LOCAL_H3_MAX_SECONDS`), 1 to 5 seconds at every larger size. Lengths snap to the model's frame counts (the real length is printed in the terminal). |
 | **Prompt expansion** | Not used locally. |
 | **References** | Work as usual: images, video and audio, in the order you list them, with the cast helper. First/last frames and references can't be mixed (they are two different models). |
 
@@ -112,6 +112,11 @@ Measured on an RTX 4060 Laptop (8 GB), per denoising step, plus about a minute t
 | 480p, 1 s, reference image | about 20 s | about 7 min |
 | 480p, 1 s, reference video + audio | about 38 s | about 13 min |
 | 480p, 10 s, reference image | about 150 s | about 55 min |
+| 576p, 1 s, text | about 15 s | about 5 min |
+| 576p, 5 s, text | about 85 s | about 28 min |
+| 640p, 1 s, text | about 18 s | about 6 min |
+| 640p, 5 s, text | about 115 s | about 38 min |
+| 704p, 1 s, text | about 21 s | about 7 min |
 | 768p, 1 s, text | about 22 s | about 8 min |
 | 768p, 1 s, reference image | about 32 s | about 11 min |
 | 768p, 5 s, text | about 220 s | about 75 min |
@@ -122,9 +127,25 @@ Notes:
 - **Some combinations are far too slow.** A 5-second 768p clip with a reference image and reference audio ran for over 20 minutes without finishing step 1 (the GPU's memory was full). Keep 768p clips short, and for anything bigger make it at 480p and upscale.
 - Your numbers will differ on other GPUs.
 
+### Picking a resolution
+
+Local generation can run at five sizes (width × height, 16:9; 9:16 swaps them), all multiples of 32 as the model needs. Measured on the RTX 4060 laptop, text only, per denoising step:
+
+| Size | 1 s | 5 s | Notes |
+|---|---|---|---|
+| **480p** (832×480) | about 6 s | about 52 s | by far the fastest, and the only size allowed up to 10 seconds |
+| **576p** (1024×576) | about 15 s | about 85 s | |
+| **640p** (1152×640) | about 18 s | about 115 s | |
+| **704p** (1280×704) | about 21 s | not measured | roughly 720p |
+| **768p** (1344×768) | about 22 s | about 220 s | |
+
+Two things stand out. **There is a big jump between 480p and 576p** (about 2.5 times slower at 1 second). I haven't verified why; my guess is that 480p needs much less shuffling of the model's weights in and out of GPU memory. And **the 5-second numbers grow faster than the 1-second ones**, so long clips get expensive quickly. A 5-second clip at 20 steps takes about 18 minutes at 480p, 30 at 576p, 40 at 640p and 75 at 768p. Sizes above 480p are limited to 5 seconds because longer ones weren't measured and are likely to be impractical.
+
+A reasonable routine: draft at 480p with 10 steps, then either upscale the keeper (below) or, for a short clip you care about, regenerate it at 576p or 640p as a middle ground. Reference images, video and audio make every size slower (see the table above), and combining them with the larger sizes and longer clips is where jobs stop being practical.
+
 ## Upscaling 480p clips to 768p
 
-768p generation is about 3.7 times slower and capped at 5 seconds, so the faster route to a sharper long clip is to **make it at 480p and upscale it**. Each finished local 480p clip has an **Upscale to 768p** button with a dropdown of upscalers (your choice is remembered). The result is scaled to exactly 1344×768 (or 768×1344), keeps the original audio, and is saved as a **new clip**, so you can try several models on the same clip and compare. Upscales are free, run one at a time in the same queue as generation, and show a percentage and time left.
+768p generation is about 3.7 times slower and capped at 5 seconds, so the faster route to a sharper long clip is to **make it at 480p and upscale it**. Each finished local clip at 480p, 576p or 640p has an **Upscale to 768p** button with a dropdown of upscalers (your choice is remembered). The result is scaled to exactly 1344×768 (or 768×1344), keeps the original audio, and is saved as a **new clip**, so you can try several models on the same clip and compare. Upscales are free, run one at a time in the same queue as generation, and show a percentage and time left.
 
 **Pick the model for the kind of footage.** The dropdown groups the choices that way, with live-action first. This matters a lot: on a realistic clip the anime-tuned models make faces and skin look waxy and plastic, while the photo-style and SeedVR2 models look natural. (Tested on a realistic 480p city-street clip: SeedVR2 gave visible irises, skin texture and individual hair strands; the Real-ESRGAN photo model was natural but softer; the fast video model made a smoothed, painted-looking face.)
 
@@ -169,7 +190,7 @@ All in `server/.env` (see `server/.env.example`); restart after changing them.
 |---|---|---|
 | `LOCAL_H3_DIR` | `../h3-local` | Folder with `h3.py` and its `venv`. The Local model is hidden when it isn't there. |
 | `LOCAL_H3_STEPS` | `20` | Denoising steps for local jobs. |
-| `LOCAL_H3_MAX_SECONDS` | `10` | Longest local clip (768p stays limited to 5). |
+| `LOCAL_H3_MAX_SECONDS` | `10` | Longest local clip (sizes above 480p stay limited to 5). |
 | `LOCAL_UPSCALERS_DIR` | `<LOCAL_H3_DIR>/tools` | Folder holding `esrgan`, `realcugan`, `waifu2x`, `rife` and `seedvr2`. |
 
 ## Setting it up by hand
@@ -194,7 +215,7 @@ The last command downloads the 28 GB of weights the first time and writes a vide
 `h3.py` is the only interface Kinowrap uses, and you can run it directly:
 
 ```
-python h3.py "prompt" --seconds N --steps N --seed N [--vertical | --auto-orient] [--res 480|768]
+python h3.py "prompt" --seconds N --steps N --seed N [--vertical | --auto-orient] [--res 480|576|640|704|768]
              [--first image] [--last image] [--ref image:path --ref video:path --ref audio:path ...]
              [--ref-edge 768] [--out file.mp4]
 ```

@@ -165,7 +165,7 @@ The new job appears in **History** and is checked every 10 seconds. A 15-second 
 | **Continue from last frame** | Extracts the clip's final frame and sets it as the first frame of a new job. Keeps the look; motion and audio don't carry over. Frames can't be combined with references. |
 | **Last frame as reference** | Extracts the clip's final frame and adds it as a **reference image** (the next free "Image N"; Kinowrap tells you which number, and gives it the character name "the last frame of the previous clip" so the cast lines add "Image N shows the last frame of the previous clip." to your prompt; rename it if you like). The clip's own references, with their character names, are kept, so characters and voices carry over. A looser continuation than the button above, but the one that works together with references. If the clip was itself made from frames, those are dropped and the last frame becomes the only reference. |
 | **Upgrade to 2K** | Regenerates a finished H3 768p clip at 2K (clips from the last 7 days). Shows the price first. |
-| **Upscale to 768p** | **Local clips only.** Upscales a finished local 480p clip with the AI upscaler chosen in the dropdown beside the button, and saves the result as a new clip. See [docs/local.md](docs/local.md#upscaling-480p-clips-to-768p). |
+| **Upscale to 768p** | **Local clips only.** Upscales a finished local 480p clip with the AI upscaler chosen in the dropdown beside the button, and saves the result as a new clip (clips at 480p, 576p or 640p). See [docs/local.md](docs/local.md#upscaling-480p-clips-to-768p). |
 | **Smooth to 48 fps** | **Local clips only.** Doubles the clip's frame rate (24 to 48 fps) with RIFE for smoother motion, and saves a new clip with the original audio. See [docs/local.md](docs/local.md#smoothing-to-48-fps). |
 | **Cancel** | For jobs still queued. MiniMax doesn't charge for cancelled queued tasks, and running MiniMax jobs can't be cancelled. Local jobs can be cancelled while queued or running. |
 | **Mark not charged** | For failed jobs MiniMax didn't bill, so your totals stay right. |
@@ -248,7 +248,7 @@ All settings live in `server/.env` (copy from `server/.env.example`). Restart af
 | `MINIMAX_BASE_URL` | `https://api.minimax.io` | MiniMax API address. Kinowrap targets the international platform; other regions are untested. |
 | `LOCAL_H3_DIR` | `../h3-local` | Folder with the local model (`h3.py` and its `venv`). The Local model is hidden when it isn't there. |
 | `LOCAL_H3_STEPS` | `20` | Denoising steps for local jobs (more is slower). |
-| `LOCAL_H3_MAX_SECONDS` | `10` | Longest local clip (local 768p is limited to 5). |
+| `LOCAL_H3_MAX_SECONDS` | `10` | Longest local clip (local sizes above 480p are limited to 5). |
 | `LOCAL_UPSCALERS_DIR` | `<LOCAL_H3_DIR>/tools` | Folder holding the upscaler programs. |
 
 ## Where your data lives
