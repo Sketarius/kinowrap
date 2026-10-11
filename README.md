@@ -248,7 +248,8 @@ All settings live in `server/.env` (copy from `server/.env.example`). Restart af
 | `MINIMAX_BASE_URL` | `https://api.minimax.io` | MiniMax API address. Kinowrap targets the international platform; other regions are untested. |
 | `LOCAL_H3_DIR` | `../h3-local` | Folder with the local model (`h3.py` and its `venv`). The Local model is hidden when it isn't there. |
 | `LOCAL_H3_STEPS` | `20` | Denoising steps for local jobs (more is slower). |
-| `LOCAL_H3_MAX_SECONDS` | `10` | Longest local clip (local sizes above 480p are limited to 5). |
+| `LOCAL_H3_MAX_SECONDS` | `10` | Longest local clip. |
+| `LOCAL_H3_MAX_SECONDS_ABOVE_480` | `5` | Longest local clip at 576p to 768p (raise it to try longer ones). |
 | `LOCAL_UPSCALERS_DIR` | `<LOCAL_H3_DIR>/tools` | Folder holding the upscaler programs. |
 
 ## Where your data lives

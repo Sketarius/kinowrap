@@ -91,7 +91,7 @@ Pick **Local (free, slow)** as the Model. It keeps the page's normal controls:
 |---|---|
 | **Resolution** | **480P** (832×480), **576P** (1024×576), **640P** (1152×640), **704P** (1280×704, about 720p) or **768P** (1344×768), or the same sizes turned on their side for 9:16. Shown as "free". See [Picking a resolution](#picking-a-resolution). |
 | **Aspect ratio** | 16:9 or 9:16. With a first/last frame or references you can also pick **Adaptive**, which follows your first image. |
-| **Length** | 1 to 10 seconds at 480p (`LOCAL_H3_MAX_SECONDS`), 1 to 5 seconds at every larger size. Lengths snap to the model's frame counts (the real length is printed in the terminal). |
+| **Length** | 1 to 10 seconds at 480p (`LOCAL_H3_MAX_SECONDS`), 1 to 5 seconds at every larger size (raise that with `LOCAL_H3_MAX_SECONDS_ABOVE_480`). Lengths snap to the model's frame counts (the real length is printed in the terminal). |
 | **Prompt expansion** | Not used locally. |
 | **References** | Work as usual: images, video and audio, in the order you list them, with the cast helper. First/last frames and references can't be mixed (they are two different models). |
 
@@ -140,7 +140,7 @@ Local generation can run at five sizes (width × height, 16:9; 9:16 swaps them),
 | **704p** (1280×704) | about 21 s | not measured | roughly 720p |
 | **768p** (1344×768) | about 22 s | about 220 s | |
 
-Two things stand out. **There is a big jump between 480p and 576p** (about 2.5 times slower at 1 second). I haven't verified why; my guess is that 480p needs much less shuffling of the model's weights in and out of GPU memory. And **the 5-second numbers grow faster than the 1-second ones**, so long clips get expensive quickly. A 5-second clip at 20 steps takes about 18 minutes at 480p, 30 at 576p, 40 at 640p and 75 at 768p. Sizes above 480p are limited to 5 seconds because longer ones weren't measured and are likely to be impractical.
+Two things stand out. **There is a big jump between 480p and 576p** (about 2.5 times slower at 1 second). I haven't verified why; my guess is that 480p needs much less shuffling of the model's weights in and out of GPU memory. And **the 5-second numbers grow faster than the 1-second ones**, so long clips get expensive quickly. A 5-second clip at 20 steps takes about 18 minutes at 480p, 30 at 576p, 40 at 640p and 75 at 768p. Sizes above 480p are limited to 5 seconds by default because longer ones weren't measured and are likely to be slow. To try longer ones, set `LOCAL_H3_MAX_SECONDS_ABOVE_480=10` in `server/.env` and restart Kinowrap (not while a local job is running: restarting stops it), then watch the first step time and cancel if it is hopeless. A rough guide from 480p, where 10 seconds took about 2.3 times as long per step as 5 seconds: a 10-second clip at 640p could take around 6 minutes per step with references (about 2 hours at 20 steps), but that is a guess, not a measurement.
 
 A reasonable routine: draft at 480p with 10 steps, then either upscale the keeper (below) or, for a short clip you care about, regenerate it at 576p or 640p as a middle ground. Reference images, video and audio make every size slower (see the table above). Combining them with 768p and longer clips is where jobs stopped being practical in testing; 640p with references worked.
 
@@ -191,7 +191,8 @@ All in `server/.env` (see `server/.env.example`); restart after changing them.
 |---|---|---|
 | `LOCAL_H3_DIR` | `../h3-local` | Folder with `h3.py` and its `venv`. The Local model is hidden when it isn't there. |
 | `LOCAL_H3_STEPS` | `20` | Denoising steps for local jobs. |
-| `LOCAL_H3_MAX_SECONDS` | `10` | Longest local clip (sizes above 480p stay limited to 5). |
+| `LOCAL_H3_MAX_SECONDS` | `10` | Longest local clip. |
+| `LOCAL_H3_MAX_SECONDS_ABOVE_480` | `5` | Longest clip at 576p to 768p. Raise it (up to `LOCAL_H3_MAX_SECONDS`) to try longer clips at those sizes. |
 | `LOCAL_UPSCALERS_DIR` | `<LOCAL_H3_DIR>/tools` | Folder holding `esrgan`, `realcugan`, `waifu2x`, `rife` and `seedvr2`. |
 
 ## Setting it up by hand

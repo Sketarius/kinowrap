@@ -67,6 +67,8 @@ const upscalerExe = (u) => u.exePath ?? path.join(LOCAL_UPSCALERS_DIR, u.dir, ex
 const upscalersAvailable = () => UPSCALER_CHOICES.filter((u) => existsSync(upscalerExe(u)) && (u.needs ?? [u.need]).every((n) => existsSync(path.join(LOCAL_UPSCALERS_DIR, u.dir, n))));
 const LOCAL_H3_STEPS = Number(process.env.LOCAL_H3_STEPS || 20);
 const LOCAL_H3_MAX_SECONDS = Number(process.env.LOCAL_H3_MAX_SECONDS || 10);
+// Sizes above 480p default to 5 seconds because longer ones were not measured and are slow. Raise this to try longer ones.
+const LOCAL_H3_MAX_SECONDS_ABOVE_480 = Number(process.env.LOCAL_H3_MAX_SECONDS_ABOVE_480 || 5);
 const LOCAL = 'local-h3';
 const UPSCALABLE_FROM = ['480P', '576P', '640P']; // 704P is too close to the 768p target to be worth upscaling
 
@@ -101,8 +103,8 @@ if (existsSync(LOCAL_H3_SCRIPT) && existsSync(LOCAL_H3_PYTHON)) {
   MODELS[LOCAL] = {
     label: 'Local (free, slow)', local: true, upscalers: upscalersAvailable().map(({ id, label, perSecond, note }) => ({ id, label, perSecond, note, for: UPSCALER_FOR[id] ?? 'animation' })).sort((a, b) => (a.for === b.for ? 0 : a.for === 'live-action' ? -1 : 1)), canUpscale: upscalersAvailable().length > 0, canInterpolate: rifeAvailable(), minSeconds: 1, maxSeconds: LOCAL_H3_MAX_SECONDS,
     rates: { '480P': 0, '576P': 0, '640P': 0, '704P': 0, '768P': 0 },
-    // Everything above 480p is capped at 5 seconds: measured step times grow quickly with size (see docs/local.md).
-    maxSecondsByRes: Object.fromEntries(['576P', '640P', '704P', '768P'].map((r) => [r, Math.min(5, LOCAL_H3_MAX_SECONDS)])),
+    // Everything above 480p is capped (5 seconds unless LOCAL_H3_MAX_SECONDS_ABOVE_480 says otherwise): step times grow quickly with size (see docs/local.md).
+    maxSecondsByRes: Object.fromEntries(['576P', '640P', '704P', '768P'].map((r) => [r, Math.min(LOCAL_H3_MAX_SECONDS_ABOVE_480, LOCAL_H3_MAX_SECONDS)])),
     refVideoRates: {}, freeImages: 0, extraImage: 0, ratios: ['16:9', '9:16'],
   };
 }
