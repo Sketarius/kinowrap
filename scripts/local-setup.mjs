@@ -3,7 +3,7 @@
 //
 //   npm run local -- status
 //   npm run local -- install h3 [--weights fl2va|ref2va|all]
-//   npm run local -- install upscaler esrgan|realcugan|waifu2x|all
+//   npm run local -- install tools esrgan|realcugan|waifu2x|rife|all   ("upscaler" is accepted too)
 //   npm run local -- install seedvr2
 //   npm run local -- install all
 //
@@ -74,9 +74,16 @@ const WEIGHTS = {
   },
 };
 
-// Real-ESRGAN, Real-CUGAN and waifu2x are small ncnn/Vulkan programs from GitHub releases. They need no Python.
+// Real-ESRGAN, Real-CUGAN, waifu2x and RIFE are ncnn/Vulkan programs from GitHub releases. They need no Python.
+// (RIFE is not an upscaler: it makes the "Smooth to 48 fps" button work.)
 const platformZip = (win, linux) => (isWin ? win : linux);
 const UPSCALERS = {
+  rife: {
+    name: 'RIFE frame interpolation (MIT)', sizeMB: 432, unsupported: process.platform === 'darwin',
+    url: `https://github.com/nihui/rife-ncnn-vulkan/releases/download/20221029/rife-ncnn-vulkan-20221029-${platformZip('windows', 'ubuntu')}.zip`,
+    program: 'rife-ncnn-vulkan', check: ['rife-v4.6/flownet.param'],
+    adds: 'the Smooth to 48 fps button',
+  },
   esrgan: {
     name: 'Real-ESRGAN (BSD-3-Clause)', sizeMB: 46, unsupported: process.platform === 'darwin',
     url: `https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-${platformZip('windows', 'ubuntu')}.zip`,
@@ -232,7 +239,7 @@ function status() {
   say(`  ${tick(h3ok)} program: h3.py, Python environment and DiffSynth-Studio`);
   for (const [id, w] of Object.entries(WEIGHTS)) say(`  ${tick(filesExist(w.files))} ${w.label} (${fmtGB(w.sizeGB)}) [${id}]`);
   say();
-  say('Upscalers (add choices to the Upscale to 768p dropdown)');
+  say('Upscalers and extras (add choices to the Upscale to 768p dropdown, and the Smooth to 48 fps button)');
   for (const [id, u] of Object.entries(UPSCALERS)) {
     const dir = path.join(TOOLS, id);
     say(`  ${tick(existsSync(path.join(dir, exe(u.program))) && filesExist(u.check.map((c) => path.join(dir, c))))} ${u.name}: ${u.adds} [${id}]`);
@@ -240,7 +247,7 @@ function status() {
   const sv = existsSync(venvPython(SEEDVR2_DIR)) && existsSync(path.join(SEEDVR2_DIR, 'repo', 'inference_cli.py')) && filesExist(SEEDVR2.files.map((f) => path.join(seedvr2Models, f.name)));
   say(`  ${tick(sv)} SeedVR2 3B: the best for realistic footage, slow (about 90 to 180 s per second of video) [seedvr2]`);
   say();
-  say('Install what is missing with:  npm run local -- install <h3 | upscaler <name|all> | seedvr2 | all>');
+  say('Install what is missing with:  npm run local -- install <h3 | tools <name|all> | seedvr2 | all>');
   say('Restart Kinowrap afterwards so it notices.');
 }
 
@@ -356,7 +363,7 @@ function usage() {
   say('Usage:');
   say('  npm run local -- status');
   say('  npm run local -- install h3 [--weights fl2va|ref2va|all]');
-  say('  npm run local -- install upscaler <esrgan|realcugan|waifu2x|all>');
+  say('  npm run local -- install tools <esrgan|realcugan|waifu2x|rife|all>   ("upscaler" works too)');
   say('  npm run local -- install seedvr2');
   say('  npm run local -- install all [--weights all]');
   say('Options: --dir <folder>  --cuda cu126  --yes  --dry-run');
@@ -369,7 +376,7 @@ try {
   }
   if (command === 'status') status();
   else if (command === 'install' && what === 'h3') await installH3(opt('weights'));
-  else if (command === 'install' && what === 'upscaler' && (which === 'all' || UPSCALERS[which])) {
+  else if (command === 'install' && (what === 'upscaler' || what === 'tools') && (which === 'all' || UPSCALERS[which])) {
     for (const id of which === 'all' ? Object.keys(UPSCALERS) : [which]) await installUpscaler(id);
   } else if (command === 'install' && what === 'seedvr2') await installSeedvr2();
   else if (command === 'install' && what === 'all') {

@@ -291,6 +291,7 @@
           <strong>{{ j.status }}</strong>
           @if (j.type === 'upgrade') { · <span class="tag">2K upgrade</span> }
           @if (j.type === 'upscale') { · <span class="tag">upscaled to 768p · {{ upscalerLabel(j) }}</span> }
+          @if (j.type === 'interpolate') { · <span class="tag">smoothed to {{ j.fps }} fps</span> }
           · {{ modelLabel(j) }} {{ j.duration }}s {{ j.resolution }}@if (j.ratio) { · {{ j.ratio }} } · {{ j.model === 'local-h3' ? 'free' : '$' + j.cost.toFixed(2) }}
           @if (j.type !== 'stitch') { · {{ j.refs?.length ? j.refs!.length + ' reference(s) sent' : 'no references' }} }
           @if (j.hidden) { · <em>hidden</em> }
@@ -326,14 +327,14 @@
           @if (j.model === 'local-h3') {
             @if (j.progress; as p) {
               <progress [value]="p.step" [max]="p.total"></progress>
-              @if (p.phase === 'upscale') {
-                <p class="hint">Upscaling {{ p.step }}% · {{ fmtTime(p.elapsed) }} elapsed · about {{ fmtTime(p.eta) }} left</p>
+              @if (p.phase === 'upscale' || p.phase === 'smooth') {
+                <p class="hint">{{ p.phase === 'smooth' ? 'Smoothing' : 'Upscaling' }} {{ p.step }}% · {{ fmtTime(p.elapsed) }} elapsed · about {{ fmtTime(p.eta) }} left</p>
               } @else {
                 <p class="hint">Step {{ p.step }} of {{ p.total }} · {{ fmtTime(p.elapsed) }} elapsed ·
                   {{ p.step < p.total ? 'about ' + fmtTime(p.eta) + ' left' : 'decoding and saving…' }}</p>
               }
             } @else if (j.rawStatus === 'running') {
-              @if (j.type === 'upscale') {
+              @if (j.type === 'upscale' || j.type === 'interpolate') {
                 <p class="hint">Preparing frames, {{ since(j.startedAt) }} so far…</p>
               } @else {
                 <p class="hint">Starting, {{ since(j.startedAt) }} so far (the first step is slow, and shows a time estimate once it finishes).</p>
@@ -361,6 +362,7 @@
             </select>
             <button type="button" (click)="upscale(j)" title="Sharpen this clip with the chosen AI upscaler and save it as a new 768p video (free, runs on your GPU)">Upscale to 768p</button>
           }
+          @if (canInterpolate(j)) { <button type="button" (click)="interpolate(j)" title="Double this clip's frame rate (24 to 48 fps) with RIFE for smoother motion. Free, runs on your GPU, saved as a new clip.">Smooth to 48 fps</button> }
           @if (j.status === 'processing' && (j.rawStatus === 'queued' || j.model === 'local-h3')) { <button type="button" (click)="cancelJob(j)">Cancel</button> }
           @if (j.upgrade; as up) {
             <button type="button" [title]="upgradeTitle(j)" (click)="upgrade(j)">Upgrade to 2K · ${{ up.total.toFixed(2) }}</button>

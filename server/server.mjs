@@ -59,6 +59,10 @@ const UPSCALER_FOR = {
   'realesr-animevideov3': 'animation', 'realcugan-conservative': 'animation', 'realcugan-denoise': 'animation', 'waifu2x-cunet': 'animation',
   'realesrgan-x4plus-anime': 'animation', 'realesrgan-x4plus': 'live-action', 'seedvr2-3b': 'live-action',
 };
+// RIFE (frame interpolation) powers the "Smooth to 48 fps" button. Optional, like the upscalers.
+const RIFE_DIR = path.join(LOCAL_UPSCALERS_DIR, 'rife');
+const RIFE_EXE = path.join(RIFE_DIR, exe('rife-ncnn-vulkan'));
+const rifeAvailable = () => existsSync(RIFE_EXE) && existsSync(path.join(RIFE_DIR, 'rife-v4.6', 'flownet.param'));
 const upscalerExe = (u) => u.exePath ?? path.join(LOCAL_UPSCALERS_DIR, u.dir, exe(u.program));
 const upscalersAvailable = () => UPSCALER_CHOICES.filter((u) => existsSync(upscalerExe(u)) && (u.needs ?? [u.need]).every((n) => existsSync(path.join(LOCAL_UPSCALERS_DIR, u.dir, n))));
 const LOCAL_H3_STEPS = Number(process.env.LOCAL_H3_STEPS || 20);
@@ -94,7 +98,7 @@ const MODELS = {
 // Local H3 on your own GPU: free, slow, one job at a time.
 if (existsSync(LOCAL_H3_SCRIPT) && existsSync(LOCAL_H3_PYTHON)) {
   MODELS[LOCAL] = {
-    label: 'Local (free, slow)', local: true, upscalers: upscalersAvailable().map(({ id, label, perSecond, note }) => ({ id, label, perSecond, note, for: UPSCALER_FOR[id] ?? 'animation' })).sort((a, b) => (a.for === b.for ? 0 : a.for === 'live-action' ? -1 : 1)), canUpscale: upscalersAvailable().length > 0, minSeconds: 1, maxSeconds: LOCAL_H3_MAX_SECONDS,
+    label: 'Local (free, slow)', local: true, upscalers: upscalersAvailable().map(({ id, label, perSecond, note }) => ({ id, label, perSecond, note, for: UPSCALER_FOR[id] ?? 'animation' })).sort((a, b) => (a.for === b.for ? 0 : a.for === 'live-action' ? -1 : 1)), canUpscale: upscalersAvailable().length > 0, canInterpolate: rifeAvailable(), minSeconds: 1, maxSeconds: LOCAL_H3_MAX_SECONDS,
     rates: { '480P': 0, '768P': 0 }, maxSecondsByRes: { '768P': Math.min(5, LOCAL_H3_MAX_SECONDS) },
     refVideoRates: {}, freeImages: 0, extraImage: 0, ratios: ['16:9', '9:16'],
   };
@@ -522,27 +526,93 @@ async function runUpscale(id, job, ledger) {
   } catch (e) {
     error = e;
   }
+  return settleAuxJob(id, out, dir, error, (l, j) => {
+    const s = l.jobs.find((x) => x.id === j.sourceId);
+    if (s) s.upscaledTo = id;
+  });
+}
+
+// The shared ending of upscale and smoothing jobs: clean up, record the result in the ledger, start the next queued job.
+async function settleAuxJob(id, out, dir, error, onOk) {
   localRunning = null;
   localProgress.delete(id);
   fs.rm(dir, { recursive: true, force: true }).catch(() => {});
   const wasCancelled = localCancelled.delete(id);
   const ok = !error && existsSync(out);
   const l = await readLedger();
-  const job2 = l.jobs.find((j) => j.id === id);
-  if (job2) {
-    if (wasCancelled) job2.status = 'cancelled';
+  const job = l.jobs.find((j) => j.id === id);
+  if (job) {
+    if (wasCancelled) job.status = 'cancelled';
     else {
-      job2.status = ok ? 'succeeded' : 'failed';
-      job2.rawStatus = job2.status;
+      job.status = ok ? 'succeeded' : 'failed';
+      job.rawStatus = job.status;
       if (ok) {
-        job2.file = `${id}.mp4`;
-        const s = l.jobs.find((j) => j.id === job2.sourceId);
-        if (s) s.upscaledTo = id;
-      } else job2.failReason = error?.stderr?.toString().trim().split('\n').pop() || error?.message || 'Upscaling failed.';
+        job.file = `${id}.mp4`;
+        onOk?.(l, job);
+      } else job.failReason = error?.stderr?.toString().trim().split('\n').pop() || error?.message || 'The job failed.';
     }
     await writeLedger(l).catch(() => {});
   }
   runNextLocal();
+}
+
+// Smooth a finished local clip to double the frame rate (24 -> 48 fps) with RIFE: extract frames, interpolate, re-encode with the original audio.
+async function runInterpolate(id, job, ledger) {
+  const src = ledger.jobs.find((j) => j.id === job.sourceId);
+  const dir = path.join(DATA_DIR, 'local', id);
+  const out = path.join(OUT_DIR, `${id}.mp4`);
+  const cancelled = () => localCancelled.has(id);
+  let error = null;
+  let newFps = 0;
+  localRunning = { id, child: null };
+  try {
+    if (!src?.file) throw new Error('The source clip is no longer on disk.');
+    const input = path.join(OUT_DIR, src.file);
+    const inDir = path.join(dir, 'in');
+    const outDir = path.join(dir, 'out');
+    await fs.mkdir(inDir, { recursive: true });
+    await fs.mkdir(outDir, { recursive: true });
+    const probe = await run('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate', '-of', 'csv=p=0', input]);
+    const [num, den] = probe.stdout.trim().split('/').map(Number);
+    const fps = num / (den || 1);
+    if (!(fps > 0)) throw new Error("Couldn't read the clip's frame rate.");
+    newFps = fps * 2;
+    await run('ffmpeg', ['-y', '-v', 'error', '-i', input, path.join(inDir, '%08d.png')]);
+    if (cancelled()) throw new Error('cancelled');
+    const expected = (await fs.readdir(inDir)).length * 2;
+    const started = Date.now();
+    // RIFE prints no progress, so count the frames it has written.
+    await new Promise((resolve, reject) => {
+      const child = spawn(RIFE_EXE, ['-i', inDir, '-o', outDir, '-m', 'rife-v4.6', '-f', '%08d.png'], { cwd: RIFE_DIR, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      localRunning.child = child;
+      const tail = [];
+      for (const stream of [child.stdout, child.stderr]) {
+        stream.on('data', (d) => { for (const l of d.toString().split(/[\r\n]+/)) if (l.trim()) { tail.push(l.trim()); if (tail.length > 20) tail.shift(); } });
+      }
+      const timer = setInterval(async () => {
+        const n = await fs.readdir(outDir).then((f) => f.length).catch(() => 0);
+        const pct = Math.min(99, (100 * n) / expected);
+        const elapsed = (Date.now() - started) / 1000;
+        localProgress.set(id, { step: Math.round(pct), total: 100, elapsed: Math.round(elapsed), eta: pct > 0 ? Math.round((elapsed * (100 - pct)) / pct) : 0, phase: 'smooth' });
+      }, 700);
+      child.on('error', (e) => { clearInterval(timer); reject(e); });
+      child.on('close', (code) => {
+        clearInterval(timer);
+        if (code === 0) resolve();
+        else reject(new Error([...tail].reverse().find((t) => /error|fail/i.test(t)) || `RIFE exited with code ${code}.`));
+      });
+    });
+    if (cancelled()) throw new Error('cancelled');
+    await run('ffmpeg', ['-y', '-v', 'error', '-framerate', String(newFps), '-i', path.join(outDir, '%08d.png'), '-i', input, '-map', '0:v', '-map', '1:a?',
+      '-c:v', 'libx264', '-crf', '16', '-pix_fmt', 'yuv420p', '-c:a', 'copy', '-shortest', out]);
+  } catch (e) {
+    error = e;
+  }
+  return settleAuxJob(id, out, dir, error, (l, j) => {
+    j.fps = newFps;
+    const s = l.jobs.find((x) => x.id === j.sourceId);
+    if (s) s.smoothedTo = id;
+  });
 }
 
 function runNextLocal() {
@@ -555,6 +625,7 @@ function runNextLocal() {
     job.startedAt = new Date().toISOString();
     await writeLedger(l);
     if (job.type === 'upscale') return runUpscale(id, job, l);
+    if (job.type === 'interpolate') return runInterpolate(id, job, l);
     const out = path.join(OUT_DIR, `${id}.mp4`);
     const args = ['-u', LOCAL_H3_SCRIPT, '--seconds', String(job.duration), '--steps', String(job.steps), '--seed', String(job.seed), '--res', job.resolution === '768P' ? '768' : '480', '--out', out];
     if (job.ratio === '9:16') args.push('--vertical');
@@ -1016,15 +1087,33 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { remaining: remainingOf(l) });
     }
     // Per-job actions.
-    const action = url.pathname.match(/^\/api\/jobs\/([^/]+)\/(cancel|hide|delete-file|last-frame|upscale)$/);
+    const action = url.pathname.match(/^\/api\/jobs\/([^/]+)\/(cancel|hide|delete-file|last-frame|upscale|interpolate)$/);
     if (req.method === 'POST' && action) {
       const [, id, what] = action;
       const l = await readLedger();
       const job = l.jobs.find((j) => j.id === id);
       if (!job) return send(res, 404, { error: 'Job not found.' });
 
+      if (what === 'interpolate') { // local clips only: double the frame rate (24 -> 48 fps) with RIFE
+        if (job.model !== LOCAL || job.type === 'interpolate' || job.fps) return send(res, 400, { error: 'Only local clips that are not already smoothed can be smoothed.' });
+        if (!rifeAvailable()) return send(res, 400, { error: 'RIFE is not installed (run: npm run local -- install tools rife).' });
+        if (job.status !== 'succeeded' || !job.file) return send(res, 400, { error: 'Only finished local clips can be smoothed.' });
+        if (l.jobs.some((j) => j.type === 'interpolate' && j.sourceId === job.id && ['processing', 'succeeded'].includes(j.status))) {
+          return send(res, 409, { error: 'This clip already has a smoothed 48 fps version (or one is in progress).' });
+        }
+        const newId = `local-sm-${Date.now()}`;
+        l.jobs.push({
+          id: newId, type: 'interpolate', sourceId: job.id, model: LOCAL, mode: job.mode, prompt: job.prompt, cost: 0, resolution: job.resolution,
+          duration: job.duration, ratio: job.ratio, status: 'processing', rawStatus: 'queued', file: null, createdAt: new Date().toISOString(), refs: [],
+        });
+        await writeLedger(l);
+        localQueue.push(newId);
+        runNextLocal();
+        return send(res, 200, { id: newId });
+      }
       if (what === 'upscale') { // local clips only; MiniMax jobs have their own 2K upgrade
         if (job.model !== LOCAL || job.type === 'upscale') return send(res, 400, { error: 'Only clips made by the local model can be upscaled here.' });
+        if (job.type === 'interpolate' || job.fps) return send(res, 400, { error: 'Smoothed 48 fps clips can not be upscaled. Upscale the original clip first, then smooth the result.' });
         if (!MODELS[LOCAL]?.canUpscale) return send(res, 400, { error: 'The upscaler is not installed (see the README).' });
         if (job.status !== 'succeeded' || !job.file || job.resolution !== '480P') return send(res, 400, { error: 'Only finished 480p local clips can be upscaled.' });
         const { model: chosen } = await readBody(req);

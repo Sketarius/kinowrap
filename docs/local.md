@@ -8,6 +8,7 @@ Kinowrap can run **MiniMax H3 on your own GPU**, for free but slowly, and upscal
 - [Using it in Kinowrap](#using-it-in-kinowrap)
 - [How long things take](#how-long-things-take)
 - [Upscaling 480p clips to 768p](#upscaling-480p-clips-to-768p)
+- [Smoothing to 48 fps](#smoothing-to-48-fps)
 - [Settings](#settings)
 - [Setting it up by hand](#setting-it-up-by-hand)
 - [Running h3.py yourself](#running-h3py-yourself)
@@ -20,13 +21,14 @@ Kinowrap can run **MiniMax H3 on your own GPU**, for free but slowly, and upscal
 - A **Local (free, slow)** entry in the Model list. It makes **text-to-video, first/last-frame video and reference video** (images, video, audio) with MiniMax H3, quantised to run in 8 GB of VRAM.
 - Jobs show in History as **free**: they cost $0 and never count toward your spend, daily limit or Insights. Nothing is sent to MiniMax.
 - An **Upscale to 768p** button on finished local 480p clips, with a dropdown of AI upscalers (fast anime models up to the slow, detailed SeedVR2).
+- A **Smooth to 48 fps** button that doubles a local clip's frame rate.
 
 The idea: make drafts at 480p with fewer steps, then upscale the ones you like.
 
 ## What you need
 
 - An **NVIDIA GPU with 8 GB of VRAM** or more. It was built and tested on an RTX 4060 Laptop (8 GB) with 16 GB of RAM.
-- About **40 GB of free disk** for the local model (28 GB of weights, plus 10.5 GB more the first time you use references) and about **10 GB more** if you install every upscaler.
+- About **40 GB of free disk** for the local model (28 GB of weights, plus 10.5 GB more the first time you use references) and about **10 GB more** if you install every upscaler and RIFE.
 - **Windows or Linux.** The local model and upscalers need an NVIDIA GPU (`h3.py` asks for CUDA), so they aren't available on macOS or on AMD GPUs. **Kinowrap itself, with all the MiniMax features, runs fine on macOS, Linux and Windows**; on a Mac you simply won't see the Local model, and `npm run local -- status` says so.
 - **Python 3.11 or 3.12**, **git** and **ffmpeg** on your PATH, and the **NVIDIA driver** (so `nvidia-smi` works).
 
@@ -50,7 +52,7 @@ Local H3 (adds "Local (free, slow)" to the Model list)
   ✓ text and first/last-frame weights (28 GB) [fl2va]
   ✗ reference weights (images, video, audio) (11 GB) [ref2va]
 Upscalers (add choices to the Upscale to 768p dropdown)
-  ✓ Real-ESRGAN ...  ✗ Real-CUGAN ...  ✗ waifu2x ...  ✗ SeedVR2 3B ...
+  ✗ RIFE (the Smooth to 48 fps button)  ✓ Real-ESRGAN ...  ✗ Real-CUGAN ...  ✗ waifu2x ...  ✗ SeedVR2 3B ...
 ```
 
 Then install what you want:
@@ -61,10 +63,11 @@ Then install what you want:
 | `npm run local -- install h3 --weights fl2va` | Also downloads the text and first/last-frame model weights from ModelScope. | 28 GB |
 | `npm run local -- install h3 --weights ref2va` | Also downloads the reference weights. | 10.5 GB |
 | `npm run local -- install h3 --weights all` | Both sets of weights. | 38.5 GB |
-| `npm run local -- install upscaler esrgan` | Real-ESRGAN: Anime / video, Anime / illustration, Live-action / photo. | 46 MB |
-| `npm run local -- install upscaler realcugan` | Real-CUGAN: Anime faithful, Anime cleaned up. | 46 MB |
-| `npm run local -- install upscaler waifu2x` | waifu2x: Anime gentle. | 36 MB |
-| `npm run local -- install upscaler all` | The three programs above. | 128 MB |
+| `npm run local -- install tools esrgan` | Real-ESRGAN: Anime / video, Anime / illustration, Live-action / photo. | 46 MB |
+| `npm run local -- install tools realcugan` | Real-CUGAN: Anime faithful, Anime cleaned up. | 46 MB |
+| `npm run local -- install tools waifu2x` | waifu2x: Anime gentle. | 36 MB |
+| `npm run local -- install tools rife` | RIFE: the Smooth to 48 fps button. | 432 MB |
+| `npm run local -- install tools all` | The three upscaler programs and RIFE (`upscaler` works in place of `tools`). | 560 MB |
 | `npm run local -- install seedvr2` | SeedVR2 3B: its own Python environment, the model and its VAE. | about 3 GB of packages + 4.2 GB of models |
 | `npm run local -- install all --weights all` | Everything. | about 50 GB |
 
@@ -145,6 +148,19 @@ A choice only appears if it is installed (see [the script](#set-it-up-with-the-s
 
 None of the upscalers can remove an "AI look" that comes from the generation itself.
 
+## Smoothing to 48 fps
+
+Generated clips are 24 fps. The **Smooth to 48 fps** button on a finished **local** clip doubles the frame rate with [RIFE](https://github.com/nihui/rife-ncnn-vulkan) (MIT), inserting an in-between frame after every frame, so motion looks smoother. It keeps the clip's size and audio and saves a **new clip**; it is free, runs on your GPU in the same one-at-a-time queue, and shows a percentage and time left. It took about 4 seconds for a 2.3-second 480p clip on an RTX 4060 laptop (larger sizes take longer; I haven't timed 768p or 1080p).
+
+- **Order matters:** upscale first, then smooth. Upscaling a clip that is already 48 fps isn't allowed (the upscalers assume 24 fps), and a clip can only be smoothed once.
+- It works on any finished local clip, including upscaled ones. The button is never shown for MiniMax jobs.
+- It guesses in-between frames, so very fast or busy motion can show small smearing or ghosting. Compare it against the original before you commit to it.
+- Install it with `npm run local -- install tools rife` (a 432 MB download, because the release bundles many RIFE models; Kinowrap uses `rife-v4.6`). Restart Kinowrap afterwards.
+
+## Not included: FlashVSR
+
+[FlashVSR](https://github.com/OpenImagingLab/FlashVSR) (Apache-2.0) is a fast open video upscaler that some reports rank next to SeedVR2, but it isn't in Kinowrap, because there is no reliable way to run it on a Windows laptop with 8 GB: the official code needs a compiled CUDA extension (Block-Sparse-Attention) that has only been tested on A100/H200 data-centre GPUs, with no stated VRAM needs, and the only low-VRAM version found is a ComfyUI custom node (GPL-3.0) with no standalone script. If a standalone, Windows-friendly port appears, it can be added the way SeedVR2 was (see [Adding another upscaler](#adding-another-upscaler)).
+
 ## Settings
 
 All in `server/.env` (see `server/.env.example`); restart after changing them.
@@ -154,7 +170,7 @@ All in `server/.env` (see `server/.env.example`); restart after changing them.
 | `LOCAL_H3_DIR` | `../h3-local` | Folder with `h3.py` and its `venv`. The Local model is hidden when it isn't there. |
 | `LOCAL_H3_STEPS` | `20` | Denoising steps for local jobs. |
 | `LOCAL_H3_MAX_SECONDS` | `10` | Longest local clip (768p stays limited to 5). |
-| `LOCAL_UPSCALERS_DIR` | `<LOCAL_H3_DIR>/tools` | Folder holding `esrgan`, `realcugan`, `waifu2x` and `seedvr2`. |
+| `LOCAL_UPSCALERS_DIR` | `<LOCAL_H3_DIR>/tools` | Folder holding `esrgan`, `realcugan`, `waifu2x`, `rife` and `seedvr2`. |
 
 ## Setting it up by hand
 
@@ -196,6 +212,7 @@ Start with `npm run local -- status`.
 |---|---|
 | "Local (free, slow)" isn't in the Model list | The server didn't find `h3.py` and `venv` in `LOCAL_H3_DIR`. Run `npm run local -- status`, then restart Kinowrap. |
 | No upscale button, or a choice is missing | Only finished local **480p** clips get it, and only installed choices are listed. Check `status`, then restart Kinowrap. |
+| No Smooth to 48 fps button | RIFE isn't installed (`npm run local -- install tools rife`), or the clip is already smoothed, is a MiniMax clip, or is still running. Restart Kinowrap after installing. |
 | `os error 1455` or "invalid python storage" | Windows ran out of memory it can promise. `h3.py` already avoids memory-mapping the weights, which fixed this here; close other heavy programs and check the Windows paging file isn't tiny. |
 | A CUDA out-of-memory error | Close apps that use the GPU, or make the clip shorter or smaller. |
 | A job runs for ages and no step finishes | The GPU's memory is full and it is spilling into system memory. Cancel it, and use 480p (then upscale) or a shorter clip. Reference images plus audio at 768p and several seconds are the worst case. |
@@ -226,6 +243,7 @@ h3-local/                       (next to kinowrap/, or LOCAL_H3_DIR)
 ├── outputs/                    clips made by running h3.py yourself
 └── tools/
     ├── esrgan/  realcugan/  waifu2x/       small ncnn upscalers
+    ├── rife/                               frame interpolation (Smooth to 48 fps)
     └── seedvr2/ (repo/, venv/, models)     SeedVR2
 kinowrap/
 ├── local/h3.py                 the launcher (source of truth)
